@@ -34,6 +34,8 @@ erDiagram
       ObjectId _id PK
       string patientId UK
       string name
+      string bloodGroup
+      boolean isActive
       date dateOfBirth
     }
     DOCTOR {
@@ -45,6 +47,8 @@ erDiagram
     DEPARTMENT {
       ObjectId _id PK
       string departmentCode UK
+      string departmentName UK
+      boolean isActive
     }
     APPOINTMENT {
       ObjectId _id PK
@@ -52,11 +56,20 @@ erDiagram
       ObjectId doctorId FK
       ObjectId patientId FK
       string slotKey
+      date appointmentDate
+      string startTime
+      string endTime
+      string status
     }
     DOCTOR_SCHEDULE {
       ObjectId _id PK
       ObjectId doctorId FK
       string workingDay
+      string startTime
+      string endTime
+      string breakStartTime
+      string breakEndTime
+      int slotDuration
     }
     VISIT_RECORD {
       ObjectId _id PK

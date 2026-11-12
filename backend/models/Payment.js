@@ -6,7 +6,7 @@ const paymentSchema = new mongoose.Schema(
     patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true },
     amount: { type: Number, required: true, min: 0.01 },
     paymentMethod: { type: String, enum: ['cash', 'card', 'bank_transfer', 'insurance', 'online'], required: true },
-    transactionReference: { type: String, required: true, unique: true, trim: true },
+    transactionReference: { type: String, required: true, trim: true },
     paymentStatus: { type: String, enum: ['pending', 'completed', 'failed', 'refunded'], default: 'pending' },
     paymentDate: { type: Date, default: Date.now },
   },

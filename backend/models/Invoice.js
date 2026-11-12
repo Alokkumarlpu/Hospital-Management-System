@@ -11,7 +11,7 @@ const lineItemSchema = new mongoose.Schema(
 );
 const invoiceSchema = new mongoose.Schema(
   {
-    invoiceNumber: { type: String, required: true, unique: true, trim: true, uppercase: true },
+    invoiceNumber: { type: String, required: true, trim: true, uppercase: true },
     patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient', required: true },
     appointmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', required: true, unique: true },
     lineItems: { type: [lineItemSchema], required: true, validate: [(items) => items.length > 0, 'At least one line item is required'] },

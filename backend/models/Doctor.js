@@ -2,8 +2,8 @@ import mongoose from 'mongoose';
 
 const doctorSchema = new mongoose.Schema(
   {
-    doctorId: { type: String, required: true, unique: true, trim: true, uppercase: true },
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true },
+    doctorId: { type: String, required: true, trim: true, uppercase: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true, sparse: true },
     name: { type: String, required: true, trim: true },
     specialization: { type: String, required: true, trim: true },
     departmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Department', required: true },
@@ -13,6 +13,8 @@ const doctorSchema = new mongoose.Schema(
     phone: { type: String, required: true, trim: true },
     email: { type: String, required: true, lowercase: true, trim: true, match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/ },
     isActive: { type: Boolean, default: true },
+    bookingLockId: { type: String, default: null, select: false },
+    bookingLockUntil: { type: Date, default: null, select: false },
   },
   { timestamps: true },
 );

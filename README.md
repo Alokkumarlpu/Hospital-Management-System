@@ -135,6 +135,54 @@ npm test
 
 Use Postman or the frontend against a configured MongoDB instance to exercise registration, login, logout, `/api/auth/me`, password changes, inactive-account rejection, admin-only user endpoints, and cross-role denial. End-to-end auth execution requires `MONGODB_URI`; this repository does not include credentials or an actual `.env`.
 
-## Phase 2 boundary
+## Phase 3 management modules
 
-Authentication, session revocation, RBAC middleware, protected route placeholders, and profile UI are implemented. Patient CRUD, doctor CRUD, appointment booking, complete dashboards, payments processing, file uploads, and clinical workflows remain deferred.
+Patient, doctor, and department management are now available through protected APIs and responsive pages.
+
+```bash
+GET    /api/patients
+POST   /api/patients
+GET    /api/patients/:id
+PUT    /api/patients/:id
+PATCH  /api/patients/:id/status
+
+GET    /api/doctors
+POST   /api/doctors
+GET    /api/doctors/:id
+PUT    /api/doctors/:id
+PATCH  /api/doctors/:id/status
+
+GET    /api/departments
+POST   /api/departments
+GET    /api/departments/:id
+PUT    /api/departments/:id
+PATCH  /api/departments/:id/status
+```
+
+All endpoints require authentication. Admins manage all three resources; front desk users manage patients and read doctor/department directories; clinicians have limited patient read access and read-only directories. Search supports `search`, and list endpoints support `page` and `limit`. See [the Phase 3 API reference](docs/api/PHASE-3-API.md) and [the Phase 3 report](PROJECT-PHASE-3-REPORT.md).
+
+## Phase 4 scheduling modules
+
+Doctor schedules and appointment scheduling are now available:
+
+```text
+POST   /api/doctor-schedules
+GET    /api/doctor-schedules
+PUT    /api/doctor-schedules/:id
+DELETE /api/doctor-schedules/:id
+
+GET    /api/appointments/available-slots
+POST   /api/appointments
+GET    /api/appointments
+GET    /api/appointments/:id
+PUT    /api/appointments/:id
+PATCH  /api/appointments/:id/status
+PATCH  /api/appointments/:id/reschedule
+PATCH  /api/appointments/:id/cancel
+```
+
+Appointment creation validates active references, doctor schedules, breaks, past dates, patient conflicts, and doctor conflicts. Concurrent requests are serialized with a short-lived atomic doctor lock; cancelled appointments release their time slots. See [the Phase 4 API reference](docs/api/PHASE-4-API.md) and [the Phase 4 report](PROJECT-PHASE-4-REPORT.md).
+
+## Phase 4 boundary
+
+Phase 4 does not implement visit records, prescriptions, diagnostic uploads, invoices, payments, or reporting workflows. Those remain for later phases.

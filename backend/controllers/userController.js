@@ -34,7 +34,7 @@ export async function updateUser(req, res, next) {
       res.status(403).json({ success: false, message: 'Only administrators can change user roles' });
       return;
     }
-    const user = await User.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true });
+    const user = await User.findByIdAndUpdate(req.params.id, updates, { returnDocument: 'after', runValidators: true });
     if (!user) {
       res.status(404).json({ success: false, message: 'User not found' });
       return;
@@ -51,7 +51,7 @@ export async function updateUser(req, res, next) {
 
 export async function updateUserStatus(req, res, next) {
   try {
-    const user = await User.findByIdAndUpdate(req.params.id, { isActive: req.body.isActive }, { new: true, runValidators: true });
+    const user = await User.findByIdAndUpdate(req.params.id, { isActive: req.body.isActive }, { returnDocument: 'after', runValidators: true });
     if (!user) {
       res.status(404).json({ success: false, message: 'User not found' });
       return;

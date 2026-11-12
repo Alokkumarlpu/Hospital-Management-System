@@ -7,7 +7,10 @@ const doctorScheduleSchema = new mongoose.Schema(
     startTime: { type: String, required: true, match: /^([01]\d|2[0-3]):[0-5]\d$/ },
     endTime: { type: String, required: true, match: /^([01]\d|2[0-3]):[0-5]\d$/ },
     slotDuration: { type: Number, required: true, min: 5, max: 240 },
+    breakStartTime: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/ },
+    breakEndTime: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/ },
     isAvailable: { type: Boolean, default: true },
+    isActive: { type: Boolean, default: true },
   },
   { timestamps: true },
 );
