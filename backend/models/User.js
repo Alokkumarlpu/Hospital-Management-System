@@ -12,4 +12,19 @@ const userSchema = new mongoose.Schema(
   { timestamps: true },
 );
 userSchema.index({ email: 1 }, { unique: true });
+
+userSchema.pre('save', async function hashPassword() {
+  if (!this.isModified('password')) {
+    return;
+  }
+  const bcrypt = await import('bcryptjs');
+  this.password = await bcrypt.default.hash(this.password, 12);
+});
+
+userSchema.methods.toSafeObject = function toSafeObject() {
+  const user = this.toObject();
+  delete user.password;
+  return user;
+};
+
 export default mongoose.model('User', userSchema);

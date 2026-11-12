@@ -8,6 +8,8 @@ export const env = {
   jwtSecret: process.env.JWT_SECRET,
   clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
   nodeEnv: process.env.NODE_ENV || 'development',
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1d',
+  cookieName: 'hms_session',
 };
 
 if (!env.mongoUri && env.nodeEnv !== 'test') {

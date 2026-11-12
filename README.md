@@ -80,6 +80,61 @@ npm run compile-models
 
 See [the ER diagram](docs/database/ER-Diagram.md) and [the system architecture](docs/architecture/SYSTEM-ARCHITECTURE.md) for relationships, indexes, and appointment concurrency decisions.
 
-## Phase 1 boundary
+## Authentication and authorization
 
-This phase does not implement login, authorization, dashboard pages, appointment booking endpoints, payments processing, file uploads, or clinical workflows. Those will be implemented only after Phase 1 approval.
+Phase 2 provides cookie-based JWT authentication with server-side session records:
+
+- `httpOnly` cookies prevent JavaScript access to the token.
+- `secure` and `SameSite=None` are enabled in production; local development uses `SameSite=Lax`.
+- Each JWT has a unique ID and matching hashed session record. Logout revokes that record, so clearing a browser cookie is not the invalidation mechanism.
+- Tokens expire according to `JWT_EXPIRES_IN` (default `1d`); password changes and deactivation revoke all sessions for the user.
+- Passwords are hashed with bcrypt and password hashes are excluded from normal queries and all API responses.
+
+Available roles:
+
+- **admin:** user management and privileged account/role changes.
+- **front_desk:** authentication foundation only in this phase; patient and billing modules remain deferred.
+- **clinician:** authentication foundation only in this phase; medical record modules remain deferred.
+
+### Authentication endpoints
+
+| Method | Endpoint | Access |
+| --- | --- | --- |
+| `POST` | `/api/auth/register` | Public; always creates `front_desk` unless an authenticated admin supplies a role |
+| `POST` | `/api/auth/login` | Public |
+| `POST` | `/api/auth/logout` | Authenticated session or idempotent public request |
+| `GET` | `/api/auth/me` | Authenticated |
+| `PUT` | `/api/auth/change-password` | Authenticated |
+| `GET` | `/api/users` | Admin |
+| `GET` | `/api/users/:id` | Admin |
+| `PUT` | `/api/users/:id` | Admin |
+| `PATCH` | `/api/users/:id/status` | Admin |
+
+Authentication endpoints are rate limited. Generic login errors avoid revealing whether an email exists. Role authorization is enforced by backend middleware, not frontend visibility.
+
+### Demo accounts
+
+The seed script creates synthetic accounts. The shared development password is `DevelopmentOnly123!`:
+
+- `admin@example.test`
+- `frontdesk1@example.test`
+- `frontdesk2@example.test`
+- `clinician1@example.test` through `clinician5@example.test`
+
+Change or remove these credentials before any non-development use. To seed, configure `backend/.env` and run `npm run seed` from `backend/`.
+
+### Authentication testing
+
+Run static checks:
+
+```bash
+cd backend
+npm run compile-models
+npm test
+```
+
+Use Postman or the frontend against a configured MongoDB instance to exercise registration, login, logout, `/api/auth/me`, password changes, inactive-account rejection, admin-only user endpoints, and cross-role denial. End-to-end auth execution requires `MONGODB_URI`; this repository does not include credentials or an actual `.env`.
+
+## Phase 2 boundary
+
+Authentication, session revocation, RBAC middleware, protected route placeholders, and profile UI are implemented. Patient CRUD, doctor CRUD, appointment booking, complete dashboards, payments processing, file uploads, and clinical workflows remain deferred.

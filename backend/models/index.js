@@ -10,3 +10,4 @@ export { default as DiagnosticReport } from './DiagnosticReport.js';
 export { default as Invoice } from './Invoice.js';
 export { default as Payment } from './Payment.js';
 export { default as AuditLog } from './AuditLog.js';
+export { default as Session } from './Session.js';

@@ -1,25 +1,38 @@
-import { Link } from 'react-router-dom';
-import { Activity } from 'lucide-react';
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { ProtectedRoute, RoleRoute } from './routes/ProtectedRoute';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import Unauthorized from './pages/Unauthorized';
+import Dashboard from './pages/Dashboard';
+import Profile from './pages/Profile';
 
 function App() {
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto flex min-h-screen max-w-5xl flex-col items-center justify-center px-6 text-center">
-        <Activity className="mb-4 h-12 w-12 text-blue-600" aria-hidden="true" />
-        <h1 className="text-4xl font-bold tracking-tight">Hospital Management System</h1>
-        <p className="mt-4 max-w-xl text-slate-600">
-          The application foundation is ready. Clinical and administrative modules will be added
-          in the next phase.
-        </p>
-        <Link
-          to="/"
-          className="mt-8 rounded-lg bg-blue-600 px-5 py-3 font-medium text-white transition hover:bg-blue-700"
-        >
-          Continue
-        </Link>
-      </div>
-    </main>
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/unauthorized" element={<Unauthorized />} />
+      <Route element={<ProtectedRoute />}>
+        <Route path="/profile" element={<Profile />} />
+        <Route element={<RoleRoute roles={['admin']} />}>
+          <Route path="/admin/dashboard" element={<Dashboard role="admin" />} />
+          <Route path="/admin/users" element={<Dashboard role="admin" section="User management placeholder" />} />
+        </Route>
+        <Route element={<RoleRoute roles={['front_desk']} />}>
+          <Route path="/front-desk/dashboard" element={<Dashboard role="front desk" />} />
+        </Route>
+        <Route element={<RoleRoute roles={['clinician']} />}>
+          <Route path="/clinician/dashboard" element={<Dashboard role="clinician" />} />
+        </Route>
+        <Route path="/" element={<HomeRedirect />} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
+}
+
+function HomeRedirect() {
+  return <Navigate to="/profile" replace />;
 }
 
 export default App;
