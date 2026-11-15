@@ -11,3 +11,4 @@ export function authorizeRoles(...roles) {
 export const requireAdmin = authorizeRoles('admin');
 export const requireFrontDesk = authorizeRoles('front_desk', 'admin');
 export const requireClinician = authorizeRoles('clinician');
+export const requirePatient = authorizeRoles('patient');

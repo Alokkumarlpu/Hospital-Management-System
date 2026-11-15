@@ -21,7 +21,7 @@ function patientUpdates(body) {
 export async function createPatient(req, res, next) {
   try {
     const patient = await Patient.create({ ...patientUpdates(req.body), patientId: createPublicId('PAT'), registeredAt: new Date() });
-    await writeAuditLog({ userId: req.user._id, action: 'create', entityType: 'Patient', entityId: patient._id });
+    await writeAuditLog({ userId: req.user._id, action: 'create', entityType: 'Patient', entityId: patient._id, req });
     res.status(201).json({ success: true, patient: safePatient(patient) });
   } catch (error) {
     if (error.code === 11000) {
@@ -58,6 +58,7 @@ export async function getPatient(req, res, next) {
       res.status(404).json({ success: false, message: 'Patient not found' });
       return;
     }
+    await writeAuditLog({ userId: req.user._id, action: 'access', entityType: 'Patient', entityId: patient._id, req });
     res.json({ success: true, patient: safePatient(patient, ['admin', 'front_desk'].includes(req.user.role)) });
   } catch (error) {
     next(error);
@@ -71,7 +72,7 @@ export async function updatePatient(req, res, next) {
       res.status(404).json({ success: false, message: 'Patient not found' });
       return;
     }
-    await writeAuditLog({ userId: req.user._id, action: 'update', entityType: 'Patient', entityId: patient._id, metadata: { fields: Object.keys(patientUpdates(req.body)) } });
+    await writeAuditLog({ userId: req.user._id, action: 'update', entityType: 'Patient', entityId: patient._id, metadata: { fields: Object.keys(patientUpdates(req.body)) }, req });
     res.json({ success: true, patient: safePatient(patient) });
   } catch (error) {
     next(error);
@@ -85,7 +86,7 @@ export async function updatePatientStatus(req, res, next) {
       res.status(404).json({ success: false, message: 'Patient not found' });
       return;
     }
-    await writeAuditLog({ userId: req.user._id, action: req.body.isActive ? 'activate' : 'deactivate', entityType: 'Patient', entityId: patient._id });
+    await writeAuditLog({ userId: req.user._id, action: req.body.isActive ? 'activate' : 'deactivate', entityType: 'Patient', entityId: patient._id, req });
     res.json({ success: true, patient: safePatient(patient) });
   } catch (error) {
     next(error);

@@ -27,6 +27,11 @@ export function AuthProvider({ children }) {
       setUser(data.user);
       return data.user;
     },
+    async registerPatient(values) {
+      const { data } = await api.post('/auth/patient/register', values);
+      setUser(data.user);
+      return data.user;
+    },
     async logout() {
       await api.post('/auth/logout');
       setUser(null);

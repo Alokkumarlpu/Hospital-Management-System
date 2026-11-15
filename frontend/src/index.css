@@ -5,27 +5,81 @@
   color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  background: #f8fafc;
+  color: #0f172a;
 }
 
 body {
   margin: 0;
   min-width: 320px;
+  background: #f8fafc;
 }
 
 @layer components {
   .input {
-    @apply mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100;
+    @apply mt-1 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10;
+  }
+
+  .auth-label {
+    display: block;
+    color: #334155;
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+
+  .auth-label > .input {
+    margin-top: 0.4rem;
   }
 
   .button {
-    @apply w-full rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0;
   }
 
   .nav-link {
-    @apply rounded px-2 py-1 text-slate-600 hover:bg-blue-50 hover:text-blue-700;
+    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-blue-50 hover:text-blue-700;
   }
 
   .nav-link.active {
-    @apply bg-blue-50 text-blue-700;
+    @apply bg-blue-50 text-blue-700 shadow-sm;
+  }
+
+  .button-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .button-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-900;
+  }
+
+  .status-badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold capitalize;
+  }
+
+  .page-card {
+    @apply rounded-2xl border border-slate-200/80 bg-white shadow-[0_8px_30px_rgba(15,23,42,0.04)];
+  }
+
+  .table-shell {
+    @apply overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_8px_30px_rgba(15,23,42,0.04)];
+  }
+
+  .table-shell thead {
+    @apply bg-slate-50/80 text-xs uppercase tracking-wide text-slate-500;
+  }
+
+  .table-shell tbody tr {
+    @apply border-t border-slate-100 transition hover:bg-blue-50/30;
+  }
+
+  .table-shell th {
+    @apply px-5 py-3.5 text-left font-semibold;
+  }
+
+  .table-shell td {
+    @apply px-5 py-4;
+  }
+
+  .skeleton {
+    @apply animate-pulse rounded-lg bg-slate-200;
   }
 }

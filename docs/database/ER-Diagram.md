@@ -15,6 +15,7 @@ erDiagram
     APPOINTMENT ||--o| VISIT_RECORD : results_in
     PATIENT ||--o{ VISIT_RECORD : has
     DOCTOR ||--o{ VISIT_RECORD : authors
+    VISIT_RECORD ||--o{ CLINICAL_NOTE : documents
     VISIT_RECORD ||--o{ PRESCRIPTION : includes
     PATIENT ||--o{ PRESCRIPTION : receives
     DOCTOR ||--o{ PRESCRIPTION : writes
@@ -73,26 +74,51 @@ erDiagram
     }
     VISIT_RECORD {
       ObjectId _id PK
+      string visitId UK
       ObjectId appointmentId FK
       ObjectId patientId FK
+      ObjectId doctorId FK
+      date visitDate
+      date lockedAt
+    }
+    CLINICAL_NOTE {
+      ObjectId _id PK
+      ObjectId visitRecordId FK
+      ObjectId patientId FK
+      ObjectId doctorId FK
     }
     PRESCRIPTION {
       ObjectId _id PK
+      string prescriptionId UK
       ObjectId visitRecordId FK
+      string status
     }
     DIAGNOSTIC_REPORT {
       ObjectId _id PK
+      string reportId UK
       ObjectId visitRecordId FK
+      string status
     }
     INVOICE {
       ObjectId _id PK
       string invoiceNumber UK
       ObjectId appointmentId FK
+      ObjectId visitRecordId FK
+      date dueDate
+      decimal totalAmount
+      decimal amountPaid
+      decimal outstandingBalance
+      string status
     }
     PAYMENT {
       ObjectId _id PK
+      string paymentId UK
       ObjectId invoiceId FK
       string transactionReference UK
+      string idempotencyKey UK
+      decimal amount
+      string paymentStatus
+      decimal refundedAmount
     }
     AUDIT_LOG {
       ObjectId _id PK
@@ -109,3 +135,7 @@ erDiagram
 - Appointment creation in the implementation phase will normalize a requested appointment to a schedule slot and derive `slotKey` as `doctorId + date + startTime`. The partial unique index on active (`scheduled` or `confirmed`) appointments rejects concurrent duplicate inserts with MongoDB duplicate-key error `11000`. The booking service must translate that error to a conflict response.
 - When a booking also updates related records, the service will use a MongoDB transaction with `session.withTransaction()`. Availability checks remain advisory; the unique index is the concurrency boundary.
 - Invoice appointment and visit-record appointment references are unique to enforce one invoice and one visit record per appointment. Payments remain one-to-many to support retries and partial payments.
+- Clinical records use public unique identifiers, author references, and optional `lockedAt` fields. Clinician access is checked through the doctor linked to the authenticated user and the appointment/visit patient relationship.
+- Diagnostic reports currently store metadata only. File metadata is validated, but private file storage and authenticated download are intentionally deferred until secure object storage is configured.
+- Invoice amounts are recalculated from line items on the backend. Payment and refund idempotency keys are unique, and invoice balance changes use conditional atomic updates when transactions are unavailable.
+- Payment records are simulated only and contain no card, UPI PIN, password, or banking credential fields.

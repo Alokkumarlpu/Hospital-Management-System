@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const patientSchema = new mongoose.Schema(
   {
     patientId: { type: String, required: true, trim: true, uppercase: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true, sparse: true },
     name: { type: String, required: true, trim: true, minlength: 2, maxlength: 120 },
     firstName: { type: String, trim: true, maxlength: 60 },
     lastName: { type: String, trim: true, maxlength: 60 },
@@ -19,6 +20,8 @@ const patientSchema = new mongoose.Schema(
     bloodGroup: { type: String, enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'unknown'], default: 'unknown' },
     registeredAt: { type: Date, default: Date.now },
     isActive: { type: Boolean, default: true },
+    invitationTokenHash: { type: String, select: false },
+    invitationExpiresAt: { type: Date, select: false },
   },
   { timestamps: true },
 );

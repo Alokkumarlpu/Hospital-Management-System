@@ -1,6 +1,6 @@
 # Hospital Management System
 
-Phase 1 foundation for the Algions AI Labs internship assessment. This repository contains the MERN application scaffold, REST API health check, MongoDB/Mongoose data architecture, synthetic seed data, and architecture documentation. Authentication, dashboards, and clinical/business workflows are intentionally reserved for Phase 2.
+This repository contains the MERN Hospital Management System developed through Phase 5 of the Algions AI Labs internship assessment.
 
 ## Technology stack
 
@@ -79,10 +79,11 @@ npm run compile-models
 ```
 
 See [the ER diagram](docs/database/ER-Diagram.md) and [the system architecture](docs/architecture/SYSTEM-ARCHITECTURE.md) for relationships, indexes, and appointment concurrency decisions.
+Additional submission documentation is available in the [database schema](docs/database/DATABASE-SCHEMA.md), [API documentation](docs/api/API-DOCUMENTATION.md), [architecture diagram](docs/architecture/SYSTEM-ARCHITECTURE-DIAGRAM.md), [appointment workflow](docs/architecture/APPOINTMENT-WORKFLOW.md), and [final technical report](FINAL-TECHNICAL-REPORT.md).
 
 ## Authentication and authorization
 
-Phase 2 provides cookie-based JWT authentication with server-side session records:
+The system provides cookie-based JWT authentication with server-side session records:
 
 - `httpOnly` cookies prevent JavaScript access to the token.
 - `secure` and `SameSite=None` are enabled in production; local development uses `SameSite=Lax`.
@@ -93,8 +94,9 @@ Phase 2 provides cookie-based JWT authentication with server-side session record
 Available roles:
 
 - **admin:** user management and privileged account/role changes.
-- **front_desk:** authentication foundation only in this phase; patient and billing modules remain deferred.
-- **clinician:** authentication foundation only in this phase; medical record modules remain deferred.
+- **front_desk:** patient registration, appointment workflows, and permitted directories.
+- **clinician:** assigned appointments and clinical records for assigned patients.
+- **patient:** self-service appointments, medical records, prescriptions, reports, and billing.
 
 ### Authentication endpoints
 
@@ -120,6 +122,9 @@ The seed script creates synthetic accounts. The shared development password is `
 - `frontdesk1@example.test`
 - `frontdesk2@example.test`
 - `clinician1@example.test` through `clinician5@example.test`
+- `patient1@example.test`
+
+The registration screen supports Front Desk and Clinician workspaces. Patient accounts use the separate patient registration flow. Administrator accounts remain provisioned by an administrator or the seed script.
 
 Change or remove these credentials before any non-development use. To seed, configure `backend/.env` and run `npm run seed` from `backend/`.
 
@@ -183,6 +188,62 @@ PATCH  /api/appointments/:id/cancel
 
 Appointment creation validates active references, doctor schedules, breaks, past dates, patient conflicts, and doctor conflicts. Concurrent requests are serialized with a short-lived atomic doctor lock; cancelled appointments release their time slots. See [the Phase 4 API reference](docs/api/PHASE-4-API.md) and [the Phase 4 report](PROJECT-PHASE-4-REPORT.md).
 
-## Phase 4 boundary
+## Phase 5 clinical modules
 
-Phase 4 does not implement visit records, prescriptions, diagnostic uploads, invoices, payments, or reporting workflows. Those remain for later phases.
+Clinical workflows are available through protected APIs and responsive pages:
+
+```text
+POST   /api/visits
+GET    /api/visits
+PUT    /api/visits/:id
+POST   /api/clinical-notes
+POST   /api/prescriptions
+GET    /api/prescriptions
+POST   /api/diagnostic-reports
+PATCH  /api/diagnostic-reports/:id/status
+GET    /api/history?patientId=<id>
+```
+
+Clinicians can create and modify assigned clinical records. Administrators have read-only clinical access, and front-desk users cannot access clinical records. Diagnostic report metadata is supported; secure file storage is intentionally not enabled until object storage and authenticated file access are configured. See [the Phase 5 API reference](docs/api/PHASE-5-API.md) and [the Phase 5 report](PROJECT-PHASE-5-REPORT.md).
+
+## Phase 6 billing modules
+
+Billing workflows are available through protected APIs and responsive pages:
+
+```text
+POST   /api/invoices
+GET    /api/invoices
+PUT    /api/invoices/:id
+PATCH  /api/invoices/:id/cancel
+POST   /api/payments
+GET    /api/payments
+POST   /api/payments/:id/refund
+GET    /api/billing/dashboard
+GET    /api/billing/reports
+GET    /api/billing/outstanding
+```
+
+## Phase 7 audit, analytics, and reporting
+
+Phase 7 adds centralized audit events, role-scoped dashboards, server-side appointment and billing reports, and administrator-only audit review:
+
+```text
+GET    /api/audit-logs
+GET    /api/reports/appointments/summary
+GET    /api/reports/appointments/trends
+GET    /api/reports/appointments/by-department
+GET    /api/reports/appointments/by-doctor
+GET    /api/reports/billing/summary
+GET    /api/reports/billing/revenue-trends
+GET    /api/reports/billing/invoice-status
+GET    /api/reports/billing/payment-methods
+GET    /api/dashboard/summary
+```
+
+Reports accept UTC date filters through `from` and `to` query parameters. Successful payments are counted after refunds; failed payments are excluded. Audit exports use CSV formula-injection protection and omit secrets and clinical content. See the [Phase 7 API reference](docs/api/PHASE-7-API.md) and [Phase 7 report](PROJECT-PHASE-7-REPORT.md).
+
+Invoice totals and balances are calculated on the backend. Simulated payments support partial payments, failed transactions, idempotency keys, concurrent balance protection, and refunds. No real payment provider or financial credential collection is used. See [the Phase 6 API reference](docs/api/PHASE-6-API.md) and [the Phase 6 report](PROJECT-PHASE-6-REPORT.md).
+
+## Phase 6 boundary
+
+Phase 6 does not integrate real payment gateways, collect payment credentials, or start reporting/analytics work beyond billing reports.

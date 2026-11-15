@@ -1,7 +1,10 @@
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import { connectDatabase, disconnectDatabase } from '../config/db.js';
-import { AuditLog, Department, Doctor, DoctorSchedule, Patient, User } from '../models/index.js';
+import {
+  Appointment, AuditLog, ClinicalNote, Department, DiagnosticReport, Doctor, DoctorSchedule,
+  Invoice, Patient, Payment, Prescription, Session, User, VisitRecord,
+} from '../models/index.js';
 
 const departments = [
   ['Cardiology', 'Heart and vascular care', 'CARD'],
@@ -15,7 +18,12 @@ const scheduleDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
 
 async function seed() {
   await connectDatabase();
-  await Promise.all([AuditLog.deleteMany({}), DoctorSchedule.deleteMany({}), Doctor.deleteMany({}), Patient.deleteMany({}), Department.deleteMany({}), User.deleteMany({})]);
+  await Promise.all([
+    AuditLog.deleteMany({}), Payment.deleteMany({}), Invoice.deleteMany({}), DiagnosticReport.deleteMany({}),
+    Prescription.deleteMany({}), ClinicalNote.deleteMany({}), VisitRecord.deleteMany({}), Appointment.deleteMany({}),
+    DoctorSchedule.deleteMany({}), Doctor.deleteMany({}), Patient.deleteMany({}), Department.deleteMany({}),
+    Session.deleteMany({}), User.deleteMany({}),
+  ]);
 
   const password = await bcrypt.hash('DevelopmentOnly123!', 12);
   const users = await User.insertMany([
@@ -47,7 +55,7 @@ async function seed() {
       email: user.email,
     })),
   );
-  await Patient.insertMany(
+  const patients = await Patient.insertMany(
     Array.from({ length: 10 }, (_, index) => ({
       patientId: `PAT-${String(index + 1).padStart(4, '0')}`,
       name: `Test Patient ${index + 1}`,
@@ -59,6 +67,16 @@ async function seed() {
       emergencyContact: { name: 'Emergency Contact', relationship: 'friend', phone: '555-9999' },
     })),
   );
+  const patientUser = await User.create({
+    name: patients[0].name,
+    email: patients[0].email,
+    password,
+    role: 'patient',
+    phone: patients[0].phone,
+    patientId: patients[0]._id,
+  });
+  patients[0].userId = patientUser._id;
+  await patients[0].save();
   await DoctorSchedule.insertMany(
     doctors.flatMap((doctor) =>
       scheduleDays.map((workingDay) => ({
@@ -70,7 +88,7 @@ async function seed() {
       })),
     ),
   );
-  console.log('Seed complete: 8 users, 5 departments, 5 doctors, 10 patients, and 25 schedules.');
+  console.log('Seed complete: 9 users, 5 departments, 5 doctors, 10 patients, and 25 schedules.');
 }
 
 try {

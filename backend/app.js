@@ -13,6 +13,11 @@ import doctorRoutes from './routes/doctorRoutes.js';
 import departmentRoutes from './routes/departmentRoutes.js';
 import scheduleRoutes from './routes/scheduleRoutes.js';
 import appointmentRoutes from './routes/appointmentRoutes.js';
+import clinicalRoutes from './routes/clinicalRoutes.js';
+import billingRoutes from './routes/billingRoutes.js';
+import reportRoutes from './routes/reportRoutes.js';
+import patientPortalRoutes from './routes/patientPortalRoutes.js';
+import auditRoutes from './routes/auditRoutes.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
 const app = express();
@@ -31,12 +36,17 @@ app.use('/api/auth', rateLimit({
 }));
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/patient-portal', patientPortalRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/doctors', doctorRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/doctor-schedules', scheduleRoutes);
 app.use('/api/appointments', appointmentRoutes);
+app.use('/api', clinicalRoutes);
+app.use('/api', billingRoutes);
+app.use('/api/audit-logs', auditRoutes);
+app.use('/api', reportRoutes);
 app.use(notFoundHandler);
 app.use(errorHandler);
 

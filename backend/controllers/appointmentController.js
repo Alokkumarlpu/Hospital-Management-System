@@ -117,17 +117,19 @@ export async function appointmentSummary(req, res, next) {
       filter.doctorId = doctor._id;
     }
     const now = new Date();
-    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const serverToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const todayStart = req.query.date ? dateFromRequest(req.query.date) : serverToday;
     const tomorrow = new Date(todayStart);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-    const [total, today, upcoming, completed, cancelled] = await Promise.all([
+    const [total, today, upcoming, completed, cancelled, byStatus] = await Promise.all([
       Appointment.countDocuments(filter),
       Appointment.countDocuments({ ...filter, appointmentDate: todayStart }),
       Appointment.countDocuments({ ...filter, appointmentDate: { $gte: tomorrow }, status: { $in: activeAppointmentStatuses } }),
       Appointment.countDocuments({ ...filter, status: 'completed' }),
       Appointment.countDocuments({ ...filter, status: 'cancelled' }),
+      Appointment.aggregate([{ $match: filter }, { $group: { _id: '$status', count: { $sum: 1 } } }, { $sort: { _id: 1 } }]),
     ]);
-    res.json({ success: true, summary: { total, today, upcoming, completed, cancelled } });
+    res.json({ success: true, summary: { total, today, upcoming, completed, cancelled, byStatus } });
   } catch (error) {
     next(error);
   }

@@ -1,12 +1,13 @@
 import { Router } from 'express';
-import { changePassword, getMe, login, logout, register } from '../controllers/authController.js';
+import { changePassword, getMe, login, logout, register, registerPatient } from '../controllers/authController.js';
 import { authenticate, optionalAuthenticate } from '../middleware/authMiddleware.js';
 import { validateRequest } from '../middleware/validateRequest.js';
-import { loginValidators, passwordValidators, registrationValidators } from '../validators/authValidators.js';
+import { loginValidators, passwordValidators, patientRegistrationValidators, registrationValidators } from '../validators/authValidators.js';
 
 const router = Router();
 
 router.post('/register', optionalAuthenticate, registrationValidators, validateRequest, register);
+router.post('/patient/register', patientRegistrationValidators, validateRequest, registerPatient);
 router.post('/login', loginValidators, validateRequest, login);
 router.post('/logout', optionalAuthenticate, logout);
 router.get('/me', authenticate, getMe);

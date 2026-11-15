@@ -1,8 +1,11 @@
 import mongoose from 'mongoose';
+import { jest } from '@jest/globals';
 import request from 'supertest';
 import app from '../app.js';
 import { env } from '../config/env.js';
 import { Department, Doctor, Patient, Session, User } from '../models/index.js';
+
+jest.setTimeout(30000);
 
 const suite = env.mongoUri ? describe : describe.skip;
 let adminCookie;

@@ -5,6 +5,7 @@ export { default as Department } from './Department.js';
 export { default as Appointment } from './Appointment.js';
 export { default as DoctorSchedule } from './DoctorSchedule.js';
 export { default as VisitRecord } from './VisitRecord.js';
+export { default as ClinicalNote } from './ClinicalNote.js';
 export { default as Prescription } from './Prescription.js';
 export { default as DiagnosticReport } from './DiagnosticReport.js';
 export { default as Invoice } from './Invoice.js';

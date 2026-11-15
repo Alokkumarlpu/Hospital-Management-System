@@ -1,4 +1,5 @@
 import { User } from '../models/index.js';
+import { writeAuditLog } from '../utils/audit.js';
 
 function safeUser(user) {
   return user.toSafeObject();
@@ -13,6 +14,21 @@ export async function getAllUsers(req, res, next) {
   }
 }
 
+export async function createUser(req, res, next) {
+  try {
+    const { name, email, password, phone, role } = req.body;
+    const user = await User.create({ name, email, password, phone, role });
+    await writeAuditLog({ userId: req.user._id, action: 'create', entityType: 'User', entityId: user._id, req });
+    res.status(201).json({ success: true, user: safeUser(user) });
+  } catch (error) {
+    if (error.code === 11000) {
+      error.statusCode = 409;
+      error.message = 'An account with this email already exists';
+    }
+    next(error);
+  }
+}
+
 export async function getUserById(req, res, next) {
   try {
     const user = await User.findById(req.params.id);
@@ -20,6 +36,7 @@ export async function getUserById(req, res, next) {
       res.status(404).json({ success: false, message: 'User not found' });
       return;
     }
+    await writeAuditLog({ userId: req.user._id, action: 'update', entityType: 'User', entityId: user._id, metadata: { fields: Object.keys(updates) }, req });
     res.json({ success: true, user: safeUser(user) });
   } catch (error) {
     next(error);
@@ -60,6 +77,7 @@ export async function updateUserStatus(req, res, next) {
       const { Session } = await import('../models/index.js');
       await Session.updateMany({ userId: user._id, revokedAt: null }, { $set: { revokedAt: new Date() } });
     }
+    await writeAuditLog({ userId: req.user._id, action: user.isActive ? 'activate' : 'deactivate', entityType: 'User', entityId: user._id, req });
     res.json({ success: true, user: safeUser(user) });
   } catch (error) {
     next(error);
