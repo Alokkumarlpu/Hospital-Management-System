@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import {
   Activity, BarChart3, Building2, CalendarDays, ChevronLeft, ChevronRight, ClipboardList,
   FileText, LayoutDashboard, LogOut, Menu, Receipt, Settings, ShieldCheck, Stethoscope,
-  UserRound, Users, WalletCards, X,
+  UserRound, Users, WalletCards, X, Bell,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { destination } from '../pages/Login';
+import { api } from '../services/api';
 
 const navigation = [
   { label: 'Dashboard', to: 'dashboard', icon: LayoutDashboard, roles: ['admin', 'front_desk', 'clinician'] },
@@ -40,6 +41,33 @@ export default function ManagementLayout({ title, children, actions }) {
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+
+  async function loadNotifications() {
+    try {
+      const { data } = await api.get('/notifications');
+      setNotifications(data.notifications || []);
+      setUnreadCount(data.unreadCount || 0);
+    } catch {
+      // Notification availability should not block the management workspace.
+    }
+  }
+
+  async function readNotification(notification) {
+    if (!notification.readAt) {
+      await api.patch(`/notifications/${notification._id}/read`);
+      await loadNotifications();
+    }
+    if (notification.link) navigate(notification.link);
+  }
+
+  useEffect(() => {
+    loadNotifications();
+    const timer = window.setInterval(loadNotifications, 30000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   async function signOut() {
     await logout();
@@ -83,6 +111,10 @@ export default function ManagementLayout({ title, children, actions }) {
             </div>
             <div className="flex items-center gap-3">
               <span className="hidden rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 sm:inline-flex">Workspace active</span>
+              <div className="relative">
+                <button className="button-ghost relative" aria-label="Notifications" onClick={() => setNotificationsOpen(!notificationsOpen)}><Bell size={19} />{unreadCount > 0 && <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">{unreadCount > 99 ? '99+' : unreadCount}</span>}</button>
+                {notificationsOpen && <div className="absolute right-0 top-12 z-50 w-80 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl"><div className="mb-2 flex items-center justify-between"><p className="font-semibold text-slate-900">Notifications</p><button className="text-xs font-semibold text-blue-700" onClick={async () => { await api.patch('/notifications/read-all'); await loadNotifications(); }}>Mark all read</button></div>{notifications.length === 0 ? <p className="p-3 text-sm text-slate-500">No notifications.</p> : notifications.slice(0, 8).map((notification) => <button key={notification._id} className={`block w-full rounded-lg p-2 text-left text-sm hover:bg-slate-50 ${notification.readAt ? 'text-slate-500' : 'bg-blue-50 text-slate-900'}`} onClick={() => readNotification(notification)}><span className="font-semibold">{notification.title}</span><span className="mt-1 block text-xs">{notification.message}</span></button>)}</div>}
+              </div>
               <div className="flex items-center gap-3 border-l border-slate-200 pl-4"><span className="flex h-9 w-9 items-center justify-center rounded-full bg-teal-50 text-sm font-bold text-teal-700">{user.name?.slice(0, 2).toUpperCase()}</span><div className="hidden text-right md:block"><p className="text-sm font-semibold text-slate-800">{user.name}</p><p className="text-xs capitalize text-slate-400">{user.role.replace('_', ' ')}</p></div></div>
             </div>
           </div>

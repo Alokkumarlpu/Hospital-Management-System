@@ -2,11 +2,17 @@ import { Appointment, Department, Doctor, Patient, DoctorSchedule } from '../mod
 import { writeAuditLog } from '../utils/audit.js';
 import { activeAppointmentStatuses, findAppointmentConflict, findScheduleForAppointment, withDoctorBookingLock } from '../utils/appointment.js';
 import { createPublicId } from '../utils/identifiers.js';
+import { createNotification } from '../utils/notifications.js';
 import { escapeRegex, getPagination, paginatedResponse } from '../utils/pagination.js';
 import { combineDateAndTime, dateOnlyToUtc, dayNameForDate, isTimeRangeValid, rangesOverlap, timeToMinutes } from '../utils/time.js';
 
 const appointmentStatuses = ['scheduled', 'confirmed', 'checked_in', 'in_progress', 'completed', 'cancelled', 'no_show'];
 const editableFields = ['reason', 'appointmentType'];
+
+async function notifyPatient(patientId, notification) {
+  const patient = await Patient.findById(patientId).select('userId');
+  if (patient?.userId) await createNotification({ recipientUserId: patient.userId, ...notification });
+}
 
 function dateFromRequest(value) {
   const date = dateOnlyToUtc(value);
@@ -70,6 +76,7 @@ export async function createAppointment(req, res, next) {
       if (conflict) throw Object.assign(new Error(conflict.type === 'patient' ? 'Patient already has an overlapping appointment' : 'Doctor is not available for this time'), { statusCode: 409 });
       const appointment = await Appointment.create({ ...payload, appointmentId: createPublicId('APT'), slotKey: `${payload.appointmentDate.toISOString().slice(0, 10)}-${payload.startTime}`, createdBy: req.user._id });
       await writeAuditLog({ userId: req.user._id, action: 'create', entityType: 'Appointment', entityId: appointment._id, metadata: { appointmentDate: payload.appointmentDate, startTime: payload.startTime, endTime: payload.endTime } });
+      await notifyPatient(appointment.patientId, { type: 'appointment', title: 'Appointment booked', message: `Your appointment is booked for ${payload.startTime} on ${payload.appointmentDate.toISOString().slice(0, 10)}.`, link: `/patient/appointments/${appointment._id}`, metadata: { appointmentId: appointment._id } });
       res.status(201).json({ success: true, appointment });
     });
   } catch (error) {
@@ -159,8 +166,8 @@ export async function updateAppointment(req, res, next) {
 }
 
 const transitions = {
-  scheduled: ['confirmed', 'cancelled', 'no_show'],
-  confirmed: ['checked_in', 'cancelled', 'no_show'],
+  scheduled: ['confirmed', 'in_progress', 'cancelled', 'no_show'],
+  confirmed: ['checked_in', 'in_progress', 'cancelled', 'no_show'],
   checked_in: ['in_progress', 'cancelled'],
   in_progress: ['completed'],
   completed: [],
@@ -191,6 +198,17 @@ export async function updateAppointmentStatus(req, res, next) {
     appointment.status = nextStatus;
     await appointment.save();
     await writeAuditLog({ userId: req.user._id, action: 'status_change', entityType: 'Appointment', entityId: appointment._id, metadata: { from: previousStatus, to: nextStatus } });
+    const statusMessages = {
+      confirmed: ['Appointment confirmed', 'Your appointment has been confirmed.'],
+      checked_in: ['Checked in', 'You have been checked in for your appointment.'],
+      in_progress: ['Consultation started', 'Your doctor has started the consultation.'],
+      completed: ['Visit completed', 'Your consultation has been completed.'],
+      no_show: ['Appointment missed', 'Your appointment was marked as missed.'],
+    };
+    if (statusMessages[nextStatus]) {
+      const [title, message] = statusMessages[nextStatus];
+      await notifyPatient(appointment.patientId, { type: nextStatus === 'completed' ? 'clinical' : 'appointment', title, message, link: `/patient/appointments/${appointment._id}`, metadata: { appointmentId: appointment._id, status: nextStatus } });
+    }
     res.json({ success: true, appointment });
   } catch (error) {
     next(error);
@@ -210,6 +228,7 @@ export async function cancelAppointment(req, res, next) {
     appointment.cancelledAt = new Date();
     await appointment.save();
     await writeAuditLog({ userId: req.user._id, action: 'cancel', entityType: 'Appointment', entityId: appointment._id, metadata: { cancellationReason: req.body.cancellationReason } });
+    await notifyPatient(appointment.patientId, { type: 'appointment', title: 'Appointment cancelled', message: 'Your appointment has been cancelled.', link: `/patient/appointments/${appointment._id}`, metadata: { appointmentId: appointment._id } });
     res.json({ success: true, appointment });
   } catch (error) {
     next(error);
@@ -235,6 +254,7 @@ export async function rescheduleAppointment(req, res, next) {
       appointment.appointmentDate = date; appointment.startTime = req.body.startTime; appointment.endTime = req.body.endTime; appointment.doctorId = doctorId; appointment.departmentId = departmentId; appointment.slotKey = `${date.toISOString().slice(0, 10)}-${req.body.startTime}`;
       await appointment.save();
       await writeAuditLog({ userId: req.user._id, action: 'reschedule', entityType: 'Appointment', entityId: appointment._id, metadata: { original } });
+      await notifyPatient(appointment.patientId, { type: 'appointment', title: 'Appointment rescheduled', message: `Your appointment was moved to ${date.toISOString().slice(0, 10)} at ${req.body.startTime}.`, link: `/patient/appointments/${appointment._id}`, metadata: { appointmentId: appointment._id } });
       res.json({ success: true, appointment });
     });
   } catch (error) {

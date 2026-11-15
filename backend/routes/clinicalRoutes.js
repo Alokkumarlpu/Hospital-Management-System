@@ -3,10 +3,10 @@ import { authenticate } from '../middleware/authMiddleware.js';
 import { authorizeRoles } from '../middleware/roleMiddleware.js';
 import { validateRequest } from '../middleware/validateRequest.js';
 import {
-  completeVisit, createNote, createPrescription, createReport, createVisit, getPrescription, getReport, getVisit, listNotes, listPrescriptions, listReports, listVisits, patientHistory, updateNote, updatePrescription, updateReportStatus, updateVisit,
+  completeVisit, createNote, createPrescription, createReport, createVisit, getPrescription, getReport, getVisit, listNotes, listPrescriptions, listReports, listVisits, patientHistory, releaseReport, updateNote, updatePrescription, updateReport, updateReportStatus, updateVisit,
 } from '../controllers/clinicalController.js';
 import {
-  noteUpdateValidators, noteValidators, patientHistoryValidator, prescriptionValidators, reportStatusValidator, reportValidators, visitIdValidator, visitUpdateValidators, visitValidators,
+  noteUpdateValidators, noteValidators, patientHistoryValidator, prescriptionValidators, reportStatusValidator, reportUpdateValidators, reportValidators, visitIdValidator, visitUpdateValidators, visitValidators,
 } from '../validators/clinicalValidators.js';
 import { body, param } from 'express-validator';
 
@@ -35,6 +35,7 @@ router.post('/prescriptions', clinicianOnly, prescriptionValidators, validateReq
 router.get('/prescriptions', clinicalReaders, listPrescriptions);
 router.get('/prescriptions/patient/:patientId', clinicalReaders, [param('patientId').isMongoId()], validateRequest, (req, res, next) => { req.query.patientId = req.params.patientId; listPrescriptions(req, res, next); });
 router.get('/prescriptions/visit/:visitId', clinicalReaders, [param('visitId').isMongoId()], validateRequest, (req, res, next) => { req.query.visitRecordId = req.params.visitId; listPrescriptions(req, res, next); });
+router.get('/prescriptions/appointment/:appointmentId', clinicalReaders, [param('appointmentId').isMongoId()], validateRequest, (req, res, next) => { req.query.appointmentId = req.params.appointmentId; listPrescriptions(req, res, next); });
 router.get('/prescriptions/:id', clinicalReaders, [param('id').isMongoId()], validateRequest, getPrescription);
 router.put('/prescriptions/:id', clinicianOnly, [param('id').isMongoId(), body('medicines').optional().isArray({ min: 1, max: 50 }), body('status').optional().isIn(['active', 'completed', 'cancelled'])], validateRequest, updatePrescription);
 
@@ -42,7 +43,10 @@ router.post('/diagnostic-reports', clinicianOnly, reportValidators, validateRequ
 router.get('/diagnostic-reports', clinicalReaders, listReports);
 router.get('/diagnostic-reports/patient/:patientId', clinicalReaders, [param('patientId').isMongoId()], validateRequest, (req, res, next) => { req.query.patientId = req.params.patientId; listReports(req, res, next); });
 router.get('/diagnostic-reports/visit/:visitId', clinicalReaders, [param('visitId').isMongoId()], validateRequest, (req, res, next) => { req.query.visitRecordId = req.params.visitId; listReports(req, res, next); });
+router.get('/diagnostic-reports/appointment/:appointmentId', clinicalReaders, [param('appointmentId').isMongoId()], validateRequest, (req, res, next) => { req.query.appointmentId = req.params.appointmentId; listReports(req, res, next); });
 router.get('/diagnostic-reports/:id', clinicalReaders, [param('id').isMongoId()], validateRequest, getReport);
 router.patch('/diagnostic-reports/:id/status', clinicianOnly, reportStatusValidator, validateRequest, updateReportStatus);
+router.put('/diagnostic-reports/:id', clinicianOnly, reportUpdateValidators, validateRequest, updateReport);
+router.post('/diagnostic-reports/:id/release', clinicianOnly, [param('id').isMongoId()], validateRequest, releaseReport);
 
 export default router;

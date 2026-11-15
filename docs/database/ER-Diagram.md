@@ -5,8 +5,11 @@ The schema uses MongoDB collections with Mongoose `ObjectId` references. Referen
 ```mermaid
 erDiagram
     USER ||--o| DOCTOR : "profile for"
+    USER ||--o| PATIENT : "account for"
     USER ||--o{ APPOINTMENT : creates
     USER ||--o{ AUDIT_LOG : generates
+    USER ||--o{ SESSION : authenticates
+    USER ||--o{ NOTIFICATION : receives
     DEPARTMENT ||--o{ DOCTOR : contains
     DEPARTMENT ||--o{ APPOINTMENT : categorizes
     DOCTOR ||--o{ APPOINTMENT : attends
@@ -26,10 +29,21 @@ erDiagram
     PATIENT ||--o{ INVOICE : billed
     INVOICE ||--o{ PAYMENT : receives
     PATIENT ||--o{ PAYMENT : makes
+    PRESCRIPTION ||--o| DOCUMENT : "has PDF"
+    DIAGNOSTIC_REPORT ||--o| DOCUMENT : "has PDF"
+    VISIT_RECORD ||--o| DOCUMENT : "has PDF"
+    INVOICE ||--o| DOCUMENT : "has PDF"
     USER {
       ObjectId _id PK
       string email UK
       string role
+    }
+    SESSION {
+      ObjectId _id PK
+      ObjectId userId FK
+      string jti UK
+      date expiresAt
+      date revokedAt
     }
     PATIENT {
       ObjectId _id PK
@@ -97,7 +111,20 @@ erDiagram
       ObjectId _id PK
       string reportId UK
       ObjectId visitRecordId FK
+      ObjectId documentId FK
       string status
+    }
+    DOCUMENT {
+      ObjectId _id PK
+      string documentId UK
+      string documentType
+      ObjectId patientId FK
+      ObjectId doctorId FK
+      ObjectId appointmentId FK
+      string storageKey
+      string generationStatus
+      string status
+      boolean patientAvailable
     }
     INVOICE {
       ObjectId _id PK
@@ -125,6 +152,14 @@ erDiagram
       ObjectId userId FK
       ObjectId entityId
     }
+    NOTIFICATION {
+      ObjectId _id PK
+      ObjectId recipientUserId FK
+      string type
+      string title
+      date readAt
+      string deduplicationKey UK
+    }
 ```
 
 ## Integrity decisions
@@ -132,10 +167,10 @@ erDiagram
 - Business identifiers and user email have unique indexes.
 - Search-oriented text/compound indexes cover patient and doctor lookup.
 - Appointment queries are indexed by doctor, date, time, and status.
-- Appointment creation in the implementation phase will normalize a requested appointment to a schedule slot and derive `slotKey` as `doctorId + date + startTime`. The partial unique index on active (`scheduled` or `confirmed`) appointments rejects concurrent duplicate inserts with MongoDB duplicate-key error `11000`. The booking service must translate that error to a conflict response.
+- Appointment creation normalizes a requested appointment to a schedule slot and derives `slotKey` as `doctorId + date + startTime`. The partial unique index on active (`scheduled` or `confirmed`) appointments rejects concurrent duplicate inserts with MongoDB duplicate-key error `11000`, which the booking service translates to a conflict response.
 - When a booking also updates related records, the service will use a MongoDB transaction with `session.withTransaction()`. Availability checks remain advisory; the unique index is the concurrency boundary.
 - Invoice appointment and visit-record appointment references are unique to enforce one invoice and one visit record per appointment. Payments remain one-to-many to support retries and partial payments.
 - Clinical records use public unique identifiers, author references, and optional `lockedAt` fields. Clinician access is checked through the doctor linked to the authenticated user and the appointment/visit patient relationship.
-- Diagnostic reports currently store metadata only. File metadata is validated, but private file storage and authenticated download are intentionally deferred until secure object storage is configured.
+- Diagnostic reports store structured result rows and release metadata. Generated PDFs are stored in protected local development storage and accessed through authenticated download routes.
 - Invoice amounts are recalculated from line items on the backend. Payment and refund idempotency keys are unique, and invoice balance changes use conditional atomic updates when transactions are unavailable.
 - Payment records are simulated only and contain no card, UPI PIN, password, or banking credential fields.

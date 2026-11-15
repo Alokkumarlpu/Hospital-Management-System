@@ -1,6 +1,6 @@
 # Hospital Management System
 
-This repository contains the MERN Hospital Management System developed through Phase 5 of the Algions AI Labs internship assessment.
+CareAxis is a synthetic-data MERN hospital management system with role-based workspaces for patients, front desk staff, clinicians, and administrators.
 
 ## Technology stack
 
@@ -12,9 +12,9 @@ This repository contains the MERN Hospital Management System developed through P
 ## Structure
 
 ```text
-frontend/  React/Vite client and reusable UI foundations
-backend/   Express API, configuration, models, seeders, and tests
-docs/      Database and system architecture documentation
+frontend/  React/Vite/Tailwind client
+backend/   Express API, configuration, models, seeders, storage, and tests
+docs/      Database, architecture, API, and submission documentation
 ```
 
 ## Prerequisites
@@ -35,9 +35,15 @@ Copy `backend/.env.example` to `backend/.env` and set values. Never commit `.env
 | --- | --- |
 | `PORT` | Express port, normally `5000` |
 | `MONGODB_URI` | MongoDB connection string |
-| `JWT_SECRET` | Secret reserved for Phase 2 authentication |
+| `JWT_SECRET` | Secret used to sign JWT sessions; use a long random value |
 | `CLIENT_URL` | Frontend origin, normally `http://localhost:5173` |
 | `NODE_ENV` | `development`, `test`, or `production` |
+
+Optional frontend configuration can be supplied in `frontend/.env`:
+
+| Variable | Description |
+| --- | --- |
+| `VITE_API_URL` | API base URL; defaults to `http://localhost:5000/api` |
 
 ## Run
 
@@ -47,6 +53,8 @@ In one terminal:
 cd backend
 npm run dev
 ```
+
+Open `http://localhost:5173`.
 
 In another terminal:
 
@@ -78,8 +86,8 @@ To confirm all model modules compile without connecting to MongoDB:
 npm run compile-models
 ```
 
-See [the ER diagram](docs/database/ER-Diagram.md) and [the system architecture](docs/architecture/SYSTEM-ARCHITECTURE.md) for relationships, indexes, and appointment concurrency decisions.
-Additional submission documentation is available in the [database schema](docs/database/DATABASE-SCHEMA.md), [API documentation](docs/api/API-DOCUMENTATION.md), [architecture diagram](docs/architecture/SYSTEM-ARCHITECTURE-DIAGRAM.md), [appointment workflow](docs/architecture/APPOINTMENT-WORKFLOW.md), and [final technical report](FINAL-TECHNICAL-REPORT.md).
+See the [ER diagram](docs/database/ER-Diagram.md) and [system architecture](docs/architecture/SYSTEM-ARCHITECTURE.md) for relationships, indexes, and appointment concurrency decisions.
+Additional submission documentation is available in the [database schema](docs/database/DATABASE-SCHEMA.md), [API documentation](docs/api/API-DOCUMENTATION.md), [architecture diagram](docs/architecture/SYSTEM-ARCHITECTURE-DIAGRAM.md), [appointment workflow](docs/architecture/APPOINTMENT-WORKFLOW.md), [walkthrough script](docs/SUBMISSION-WALKTHROUGH-SCRIPT.md), and [final technical report](FINAL-TECHNICAL-REPORT.md).
 
 ## Authentication and authorization
 
@@ -106,6 +114,8 @@ Available roles:
 | `POST` | `/api/auth/login` | Public |
 | `POST` | `/api/auth/logout` | Authenticated session or idempotent public request |
 | `GET` | `/api/auth/me` | Authenticated |
+| `GET` | `/api/auth/profile` | Authenticated |
+| `PUT` | `/api/auth/profile` | Authenticated; personal fields only |
 | `PUT` | `/api/auth/change-password` | Authenticated |
 | `GET` | `/api/users` | Admin |
 | `GET` | `/api/users/:id` | Admin |
@@ -164,7 +174,7 @@ PUT    /api/departments/:id
 PATCH  /api/departments/:id/status
 ```
 
-All endpoints require authentication. Admins manage all three resources; front desk users manage patients and read doctor/department directories; clinicians have limited patient read access and read-only directories. Search supports `search`, and list endpoints support `page` and `limit`. See [the Phase 3 API reference](docs/api/PHASE-3-API.md) and [the Phase 3 report](PROJECT-PHASE-3-REPORT.md).
+All endpoints require authentication. Admins manage all three resources; front desk users manage patients and read doctor/department directories; clinicians have limited patient read access and read-only directories. Search supports `search`, and list endpoints support `page` and `limit`. See [the Phase 3 API reference](docs/api/PHASE-3-API.md) and the [final technical report](FINAL-TECHNICAL-REPORT.md).
 
 ## Phase 4 scheduling modules
 
@@ -186,9 +196,9 @@ PATCH  /api/appointments/:id/reschedule
 PATCH  /api/appointments/:id/cancel
 ```
 
-Appointment creation validates active references, doctor schedules, breaks, past dates, patient conflicts, and doctor conflicts. Concurrent requests are serialized with a short-lived atomic doctor lock; cancelled appointments release their time slots. See [the Phase 4 API reference](docs/api/PHASE-4-API.md) and [the Phase 4 report](PROJECT-PHASE-4-REPORT.md).
+Appointment creation validates active references, doctor schedules, breaks, past dates, patient conflicts, and doctor conflicts. Concurrent requests are serialized with a short-lived atomic doctor lock; cancelled appointments release their time slots. See [the Phase 4 API reference](docs/api/PHASE-4-API.md) and the [appointment workflow](docs/architecture/APPOINTMENT-WORKFLOW.md).
 
-## Phase 5 clinical modules
+## Clinical, document, and notification modules
 
 Clinical workflows are available through protected APIs and responsive pages:
 
@@ -200,11 +210,22 @@ POST   /api/clinical-notes
 POST   /api/prescriptions
 GET    /api/prescriptions
 POST   /api/diagnostic-reports
+PUT    /api/diagnostic-reports/:id
 PATCH  /api/diagnostic-reports/:id/status
+POST   /api/diagnostic-reports/:id/release
 GET    /api/history?patientId=<id>
+
+GET    /api/documents
+GET    /api/documents/:id
+GET    /api/documents/:id/download
+POST   /api/documents/:type/:id/generate
+
+GET    /api/notifications
+PATCH  /api/notifications/read-all
+PATCH  /api/notifications/:id/read
 ```
 
-Clinicians can create and modify assigned clinical records. Administrators have read-only clinical access, and front-desk users cannot access clinical records. Diagnostic report metadata is supported; secure file storage is intentionally not enabled until object storage and authenticated file access are configured. See [the Phase 5 API reference](docs/api/PHASE-5-API.md) and [the Phase 5 report](PROJECT-PHASE-5-REPORT.md).
+Clinicians can create and modify assigned clinical records. Administrators have read-only clinical access, and front-desk users cannot access clinical records. Diagnostic reports use structured result rows and the lifecycle `requested`, `pending`, `completed`, `verified`, `released`, or `cancelled`. Released prescriptions, diagnostic reports, visit summaries, and invoices are generated server-side as CareAxis-branded PDFs and served through authenticated download routes. See the [API reference](docs/api/API-DOCUMENTATION.md).
 
 ## Phase 6 billing modules
 
@@ -240,10 +261,32 @@ GET    /api/reports/billing/payment-methods
 GET    /api/dashboard/summary
 ```
 
-Reports accept UTC date filters through `from` and `to` query parameters. Successful payments are counted after refunds; failed payments are excluded. Audit exports use CSV formula-injection protection and omit secrets and clinical content. See the [Phase 7 API reference](docs/api/PHASE-7-API.md) and [Phase 7 report](PROJECT-PHASE-7-REPORT.md).
+Reports accept UTC date filters through `from` and `to` query parameters. Successful payments are counted after refunds; failed payments are excluded. Audit exports use CSV formula-injection protection and omit secrets and clinical content. See the [Phase 7 API reference](docs/api/PHASE-7-API.md) and the [final technical report](FINAL-TECHNICAL-REPORT.md).
 
-Invoice totals and balances are calculated on the backend. Simulated payments support partial payments, failed transactions, idempotency keys, concurrent balance protection, and refunds. No real payment provider or financial credential collection is used. See [the Phase 6 API reference](docs/api/PHASE-6-API.md) and [the Phase 6 report](PROJECT-PHASE-6-REPORT.md).
+Invoice totals and balances are calculated on the backend. Simulated payments support partial payments, failed transactions, idempotency keys, concurrent balance protection, and refunds. No real payment provider or financial credential collection is used. See [the Phase 6 API reference](docs/api/PHASE-6-API.md) and the [final technical report](FINAL-TECHNICAL-REPORT.md).
 
 ## Phase 6 boundary
 
 Phase 6 does not integrate real payment gateways, collect payment credentials, or start reporting/analytics work beyond billing reports.
+
+## Tests and verification
+
+```bash
+cd backend
+npm run compile-models
+npm test -- --runInBand
+
+cd ../frontend
+npm run build
+```
+
+The backend suite covers authentication, management APIs, scheduling conflicts, clinical ownership, billing/payment edge cases, reporting, PDF linkage, and role authorization. The frontend has a production build check but no separate browser-test or lint script.
+
+## Submission and known limitations
+
+- There is no hosted demo URL; use the local run steps above.
+- All demo accounts use the dummy password `DevelopmentOnly123!` and must never be used outside development.
+- MongoDB schema evolution uses Mongoose schemas; no separate migration runner is included.
+- Generated PDFs use protected local storage under `backend/storage/documents/`; production deployment should replace this with private object storage.
+- Payments are simulated and do not accept real financial credentials.
+- A 3–5 minute recording must be made from the [walkthrough script](docs/SUBMISSION-WALKTHROUGH-SCRIPT.md); no external video URL is included in this repository.

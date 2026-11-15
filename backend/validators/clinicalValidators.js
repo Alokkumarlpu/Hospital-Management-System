@@ -60,7 +60,21 @@ export const reportValidators = [
 
 export const reportStatusValidator = [
   mongoId('id'),
-  body('status').isIn(['requested', 'pending', 'completed', 'cancelled']).withMessage('Invalid report status'),
+  body('status').isIn(['requested', 'pending', 'completed', 'verified']).withMessage('Invalid report status'),
+];
+
+export const reportUpdateValidators = [
+  param('id').isMongoId().withMessage('Valid report ID is required'),
+  optionalText('reportName', 200),
+  optionalText('testCategory', 100),
+  optionalText('laboratory', 200),
+  optionalText('description', 5000),
+  optionalText('reportNotes', 5000),
+  optionalText('findings', 10000),
+  optionalText('observations', 10000),
+  optionalText('doctorNotes', 10000),
+  body('reportDate').optional().isISO8601().withMessage('Invalid report date'),
+  body('results').optional().isArray({ max: 100 }).withMessage('Results must be an array'),
 ];
 
 export const patientHistoryValidator = [

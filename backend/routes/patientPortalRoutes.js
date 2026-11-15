@@ -5,7 +5,7 @@ import { authorizeRoles, requireFrontDesk, requirePatient } from '../middleware/
 import { validateRequest } from '../middleware/validateRequest.js';
 import { availableSlots } from '../controllers/appointmentController.js';
 import {
-  bookAppointment, cancelMyAppointment, createPatientInvite, dashboard, getMyAppointment, invoices, listDepartments, listDoctors, listMyAppointments, notifications, payInvoice, payments, prescriptions, profile, records, reports, rescheduleMyAppointment, updateProfile,
+  bookAppointment, cancelMyAppointment, createPatientInvite, dashboard, getMyAppointment, invoices, listDepartments, listDoctors, listMyAppointments, markAllNotificationsRead, markNotificationRead, notifications, payInvoice, payments, prescriptions, profile, records, reports, rescheduleMyAppointment, updateProfile,
 } from '../controllers/patientPortalController.js';
 import { patientAppointmentValidators, patientAvailabilityValidators, patientIdParam } from '../validators/patientPortalValidators.js';
 import { paymentCreateValidators } from '../validators/billingValidators.js';
@@ -33,5 +33,7 @@ router.get('/invoices', invoices);
 router.get('/payments', payments);
 router.post('/payments', paymentCreateValidators, validateRequest, payInvoice);
 router.get('/notifications', notifications);
+router.patch('/notifications/read-all', markAllNotificationsRead);
+router.patch('/notifications/:id/read', patientIdParam, validateRequest, markNotificationRead);
 
 export default router;

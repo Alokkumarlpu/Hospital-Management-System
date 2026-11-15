@@ -1,4 +1,5 @@
-import { Appointment, Doctor, Invoice, Patient, VisitRecord } from '../models/index.js';
+import { Appointment, BillableService, Doctor, Invoice, Patient, VisitRecord } from '../models/index.js';
+import { createNotification } from '../utils/notifications.js';
 import { writeAuditLog } from '../utils/audit.js';
 import { calculateInvoiceTotals, invoiceStatus, roundMoney } from '../utils/billing.js';
 import { createPublicId } from '../utils/identifiers.js';
@@ -51,22 +52,32 @@ function invoicePayload(body, existing = {}) {
 
 export async function createInvoice(req, res, next) {
   try {
-    await validateReferences(req.body);
-    const payload = invoicePayload(req.body);
+    const body = { ...req.body };
+    if (Array.isArray(body.serviceIds) && body.serviceIds.length) {
+      const services = await BillableService.find({ _id: { $in: body.serviceIds }, active: true });
+      if (services.length !== body.serviceIds.length) throw billingError('One or more selected services are unavailable');
+      body.lineItems = services.map((service) => ({ serviceId: service._id, description: service.name, category: service.category, quantity: 1, unitPrice: service.unitPrice }));
+    }
+    await validateReferences(body);
+    const payload = invoicePayload(body);
     const invoice = new Invoice({
       ...payload,
       invoiceNumber: createPublicId('INV'),
-      patientId: req.body.patientId,
-      appointmentId: req.body.appointmentId || undefined,
-      visitRecordId: req.body.visitRecordId || undefined,
-      invoiceDate: req.body.invoiceDate || new Date(),
+      patientId: body.patientId,
+      appointmentId: body.appointmentId || undefined,
+      visitRecordId: body.visitRecordId || undefined,
+      invoiceDate: body.invoiceDate || new Date(),
       amountPaid: 0,
       outstandingBalance: payload.totalAmount,
       status: 'unpaid',
+      generationType: 'manual',
+      generationStatus: 'approved',
       createdBy: req.user._id,
     });
     await invoice.save();
     await writeAuditLog({ userId: req.user._id, action: 'create', entityType: 'Invoice', entityId: invoice._id, metadata: { totalAmount: invoice.totalAmount } });
+    const patient = await Patient.findById(invoice.patientId).select('userId patientId');
+    await createNotification({ recipientUserId: patient?.userId, type: 'billing', title: 'Invoice available', message: `Invoice ${invoice.invoiceNumber} is now available in your patient portal.`, link: `/patient/billing`, metadata: { invoiceId: invoice._id } });
     res.status(201).json({ success: true, invoice });
   } catch (error) {
     if (error.code === 11000) { error.statusCode = 409; error.message = 'An invoice already exists for this appointment or identifier'; }

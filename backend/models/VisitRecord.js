@@ -25,6 +25,11 @@ const visitRecordSchema = new mongoose.Schema(
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     lockedAt: { type: Date, default: null },
+    reportId: { type: String, trim: true, uppercase: true },
+    reportGeneratedAt: { type: Date },
+    billingStatus: { type: String, enum: ['not_generated', 'auto_generated', 'pending_review', 'failed'], default: 'not_generated' },
+    invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice' },
+    documentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Document' },
   },
   { timestamps: true },
 );

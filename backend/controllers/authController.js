@@ -1,7 +1,8 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'node:crypto';
+import mongoose from 'mongoose';
 import { env } from '../config/env.js';
-import { User, Session, Patient } from '../models/index.js';
+import { User, Session, Patient, Doctor } from '../models/index.js';
 import { createPublicId } from '../utils/identifiers.js';
 import { writeAuditLog } from '../utils/audit.js';
 import { authCookieOptions, createAuthToken, hashToken } from '../utils/auth.js';
@@ -77,6 +78,47 @@ export async function logout(req, res, next) {
 
 export async function getMe(req, res) {
   res.json({ success: true, user: safeUser(req.user) });
+}
+
+export async function getProfile(req, res, next) {
+  try {
+    const user = await User.findById(req.user._id);
+    const patientClauses = [{ userId: user._id }];
+    if (user.patientId && mongoose.isValidObjectId(user.patientId)) patientClauses.push({ _id: user.patientId });
+    const patient = user.role === 'patient'
+      ? await Patient.findOne({ isActive: true, $or: patientClauses })
+      : null;
+    const doctor = user.role === 'clinician'
+      ? await Doctor.findOne({ userId: user._id, isActive: true }).populate('departmentId', 'departmentName')
+      : null;
+    const profile = patient || doctor || user;
+    const fields = [user.name, user.email, user.phone, user.dateOfBirth, user.gender, user.address, user.city, user.state, user.country, user.postalCode];
+    const completion = Math.round((fields.filter(Boolean).length / fields.length) * 100);
+    res.json({ success: true, user: safeUser(user), profile, profileType: patient ? 'patient' : doctor ? 'doctor' : 'staff', completion });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateProfile(req, res, next) {
+  try {
+    const allowed = ['name', 'phone', 'alternatePhone', 'salutation', 'dateOfBirth', 'gender', 'address', 'city', 'state', 'country', 'postalCode', 'profilePhotoUrl'];
+    const user = await User.findById(req.user._id);
+    allowed.forEach((field) => {
+      if (req.body[field] !== undefined) user[field] = req.body[field];
+    });
+    await user.save();
+    if (user.role === 'patient') {
+      await Patient.findOneAndUpdate(
+        { $or: [{ userId: user._id }, { _id: user.patientId }] },
+        { $set: { name: user.name, phone: user.phone, address: user.address, email: user.email } },
+      );
+    }
+    await writeAuditLog({ userId: user._id, action: 'update', entityType: 'UserProfile', entityId: user._id, description: 'Updated personal profile details', req });
+    res.json({ success: true, user: safeUser(user) });
+  } catch (error) {
+    next(error);
+  }
 }
 
 export async function changePassword(req, res, next) {

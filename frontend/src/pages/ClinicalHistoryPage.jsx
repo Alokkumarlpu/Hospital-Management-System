@@ -15,9 +15,16 @@ export default function ClinicalHistoryPage() {
   const [message, setMessage] = useState('');
 
   async function load() {
+    if (!id || !/^[a-f\d]{24}$/i.test(id)) {
+      setError('A valid patient record is required to view clinical history.');
+      return;
+    }
     try {
+      const historyParams = { patientId: id, type: filters.type };
+      if (filters.from) historyParams.from = filters.from;
+      if (filters.to) historyParams.to = filters.to;
       const [{ data: historyData }, { data: appointmentData }] = await Promise.all([
-        api.get('/history', { params: { patientId: id, ...filters } }),
+        api.get('/history', { params: historyParams }),
         api.get('/appointments', { params: { patientId: id, limit: 50 } }),
       ]);
       setHistory(historyData);

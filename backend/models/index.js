@@ -12,3 +12,6 @@ export { default as Invoice } from './Invoice.js';
 export { default as Payment } from './Payment.js';
 export { default as AuditLog } from './AuditLog.js';
 export { default as Session } from './Session.js';
+export { default as Notification } from './Notification.js';
+export { default as BillableService } from './BillableService.js';
+export { default as Document } from './Document.js';

@@ -3,6 +3,7 @@ import { writeAuditLog } from '../utils/audit.js';
 import { createPublicId } from '../utils/identifiers.js';
 import { getPagination, paginatedResponse } from '../utils/pagination.js';
 import { invoiceStatus, roundMoney, withOptionalTransaction } from '../utils/billing.js';
+import { createNotification } from '../utils/notifications.js';
 
 function paymentError(message, statusCode = 400) {
   return Object.assign(new Error(message), { statusCode });
@@ -71,6 +72,7 @@ export async function createPayment(req, res, next) {
       return { payment, invoice: current };
     });
     await writeAuditLog({ userId: req.user._id, action: 'payment_successful', entityType: 'Payment', entityId: result.payment._id, metadata: { invoiceId: invoice._id, amount } });
+    if (req.user.role === 'patient') await createNotification({ recipientUserId: req.user._id, type: 'billing', title: 'Payment received', message: `Your payment of ₹${amount.toFixed(2)} was processed successfully.`, link: '/patient/billing', metadata: { invoiceId: invoice._id, paymentId: result.payment._id } });
     res.status(201).json({ success: true, payment: result.payment, invoice: result.invoice });
   } catch (error) {
     if (error.code === 11000) { error.statusCode = 409; error.message = 'Duplicate payment request'; }

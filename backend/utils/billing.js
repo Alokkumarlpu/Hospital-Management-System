@@ -11,7 +11,7 @@ export function calculateInvoiceTotals(lineItems, discount = 0, tax = 0) {
     if (!Number.isInteger(quantity) || quantity < 1 || !Number.isFinite(unitPrice) || unitPrice <= 0) {
       throw Object.assign(new Error('Line item quantity and unit price must be positive values'), { statusCode: 400 });
     }
-    return { description: item.description, category: item.category, quantity, unitPrice, amount: roundMoney(quantity * unitPrice) };
+    return { serviceId: item.serviceId, description: item.description, category: item.category, quantity, unitPrice, amount: roundMoney(quantity * unitPrice) };
   });
   const subtotal = roundMoney(normalizedItems.reduce((sum, item) => sum + item.amount, 0));
   const normalizedDiscount = roundMoney(discount);

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
-import { Appointment, Department, Doctor, Invoice, Patient, Payment, Prescription, DiagnosticReport, VisitRecord, ClinicalNote, User } from '../models/index.js';
+import mongoose from 'mongoose';
+import { Appointment, Department, Doctor, Document, Invoice, Patient, Payment, Prescription, DiagnosticReport, VisitRecord, ClinicalNote, User, Notification } from '../models/index.js';
 import { createAppointment, availableSlots, cancelAppointment, rescheduleAppointment } from './appointmentController.js';
 import { createPayment } from './paymentController.js';
 import { writeAuditLog } from '../utils/audit.js';
@@ -9,7 +10,22 @@ function portalError(message, statusCode = 400) {
 }
 
 export async function getPatient(req) {
-  const patient = await Patient.findOne({ _id: req.user.patientId, userId: req.user._id, isActive: true });
+  let patient = await Patient.findOne({ isActive: true, userId: req.user._id });
+  if (!patient && req.user.patientId && mongoose.isValidObjectId(req.user.patientId)) {
+    patient = await Patient.findOne({ _id: req.user.patientId, isActive: true });
+  }
+  if (!patient && req.user.email) {
+    const emailMatches = await Patient.find({ isActive: true, email: req.user.email.toLowerCase() }).limit(2);
+    if (emailMatches.length === 1 && (!emailMatches[0].userId || String(emailMatches[0].userId) === String(req.user._id))) {
+      patient = emailMatches[0];
+      if (!patient.userId) {
+        patient.userId = req.user._id;
+        await patient.save();
+        await User.findByIdAndUpdate(req.user._id, { patientId: patient._id });
+      }
+    }
+  }
+  if (patient?.userId && String(patient.userId) !== String(req.user._id)) throw portalError('Your patient profile is unavailable', 403);
   if (!patient) throw portalError('Your patient profile is unavailable', 403);
   return patient;
 }
@@ -18,7 +34,7 @@ export async function dashboard(req, res, next) {
   try {
     const patient = await getPatient(req);
     const now = new Date();
-    const [appointments, completed, pending, prescriptions, invoiceTotals, recentRecords] = await Promise.all([
+    const [appointments, completed, pending, prescriptions, invoiceTotals, recentRecords, documentTotals, recentDocuments] = await Promise.all([
       Appointment.find({ patientId: patient._id, appointmentDate: { $gte: now }, status: { $nin: ['cancelled', 'no_show'] } })
         .sort({ appointmentDate: 1, startTime: 1 }).limit(1).populate('doctorId', 'name specialization').populate('departmentId', 'departmentName'),
       Appointment.countDocuments({ patientId: patient._id, status: 'completed' }),
@@ -26,6 +42,8 @@ export async function dashboard(req, res, next) {
       Prescription.countDocuments({ patientId: patient._id, status: 'active' }),
       Invoice.aggregate([{ $match: { patientId: patient._id, status: { $ne: 'cancelled' } } }, { $group: { _id: null, outstanding: { $sum: '$outstandingBalance' } } }]),
       VisitRecord.find({ patientId: patient._id, lockedAt: { $ne: null } }).sort({ visitDate: -1 }).limit(5).populate('doctorId', 'name specialization'),
+      Document.aggregate([{ $match: { patientId: patient._id, 'availability.patient': true, generationStatus: 'generated' } }, { $group: { _id: '$documentType', count: { $sum: 1 } } }]),
+      Document.find({ patientId: patient._id, 'availability.patient': true, generationStatus: 'generated' }).sort({ generatedAt: -1 }).limit(5).populate('doctorId', 'name'),
     ]);
     res.json({
       success: true,
@@ -33,6 +51,8 @@ export async function dashboard(req, res, next) {
       summary: { upcoming: pending, completed, pending, prescriptions, outstandingBalance: invoiceTotals[0]?.outstanding || 0 },
       upcomingAppointment: appointments[0] || null,
       recentRecords,
+      documentTotals: documentTotals.reduce((totals, item) => ({ ...totals, [item._id]: item.count }), {}),
+      recentDocuments,
     });
   } catch (error) { next(error); }
 }
@@ -119,7 +139,7 @@ async function patientRecords(req, Model, populate) {
 export async function records(req, res, next) {
   try {
     const [visits, notes] = await Promise.all([
-      patientRecords(req, VisitRecord, { path: 'doctorId', select: 'name specialization' }),
+      patientRecords(req, VisitRecord, [{ path: 'doctorId', select: 'name specialization' }, { path: 'documentId', select: 'documentId generationStatus status availability' }]),
       patientRecords(req, ClinicalNote, { path: 'doctorId', select: 'name' }),
     ]);
     await writeAuditLog({ userId: req.user._id, action: 'access', entityType: 'PatientRecords', entityId: req.user.patientId, req });
@@ -128,15 +148,27 @@ export async function records(req, res, next) {
 }
 
 export async function prescriptions(req, res, next) {
-  try { res.json({ success: true, prescriptions: await patientRecords(req, Prescription, [{ path: 'doctorId', select: 'name specialization' }, { path: 'visitRecordId', select: 'visitId visitDate' }]) }); } catch (error) { next(error); }
+  try {
+    const prescriptions = await patientRecords(req, Prescription, [{ path: 'doctorId', select: 'name specialization' }, { path: 'visitRecordId', select: 'visitId visitDate' }, { path: 'documentId', select: 'documentId generationStatus status availability' }]);
+    const documents = await Document.find({ prescriptionId: { $in: prescriptions.map((item) => item._id) } }).select('documentId generationStatus status availability prescriptionId');
+    const bySource = new Map(documents.map((document) => [String(document.prescriptionId), document]));
+    prescriptions.forEach((item) => { if (!item.documentId && bySource.has(String(item._id))) item.documentId = bySource.get(String(item._id)); });
+    res.json({ success: true, prescriptions });
+  } catch (error) { next(error); }
 }
 
 export async function reports(req, res, next) {
-  try { res.json({ success: true, reports: await patientRecords(req, DiagnosticReport, [{ path: 'doctorId', select: 'name specialization' }, { path: 'visitRecordId', select: 'visitId visitDate' }]) }); } catch (error) { next(error); }
+  try {
+    const reports = await patientRecords(req, DiagnosticReport, [{ path: 'doctorId', select: 'name specialization' }, { path: 'visitRecordId', select: 'visitId visitDate' }, { path: 'documentId', select: 'documentId generationStatus status availability' }]);
+    const documents = await Document.find({ diagnosticReportId: { $in: reports.map((item) => item._id) } }).select('documentId generationStatus status availability diagnosticReportId');
+    const bySource = new Map(documents.map((document) => [String(document.diagnosticReportId), document]));
+    reports.forEach((item) => { if (!item.documentId && bySource.has(String(item._id))) item.documentId = bySource.get(String(item._id)); });
+    res.json({ success: true, reports });
+  } catch (error) { next(error); }
 }
 
 export async function invoices(req, res, next) {
-  try { const patient = await getPatient(req); res.json({ success: true, invoices: await Invoice.find({ patientId: patient._id, status: { $ne: 'cancelled' } }).sort({ invoiceDate: -1 }).populate('appointmentId', 'appointmentId appointmentDate') }); } catch (error) { next(error); }
+  try { const patient = await getPatient(req); res.json({ success: true, invoices: await Invoice.find({ patientId: patient._id, status: { $ne: 'cancelled' } }).sort({ invoiceDate: -1 }).populate('appointmentId', 'appointmentId appointmentDate').populate('documentId', 'documentId generationStatus status availability') }); } catch (error) { next(error); }
 }
 
 export async function payments(req, res, next) {
@@ -146,12 +178,37 @@ export async function payments(req, res, next) {
 export async function notifications(req, res, next) {
   try {
     await getPatient(req);
+    const [items, unread] = await Promise.all([
+      Notification.find({ recipientUserId: req.user._id }).sort({ createdAt: -1 }).limit(100),
+      Notification.countDocuments({ recipientUserId: req.user._id, readAt: null }),
+    ]);
     res.json({
       success: true,
-      available: false,
-      notifications: [],
-      message: 'Notifications are not configured for this installation.',
+      available: true,
+      notifications: items,
+      unreadCount: unread,
     });
+  } catch (error) { next(error); }
+}
+
+export async function markNotificationRead(req, res, next) {
+  try {
+    await getPatient(req);
+    const notification = await Notification.findOneAndUpdate(
+      { _id: req.params.id, recipientUserId: req.user._id },
+      { $set: { readAt: new Date() } },
+      { returnDocument: 'after' },
+    );
+    if (!notification) return res.status(404).json({ success: false, message: 'Notification not found' });
+    res.json({ success: true, notification });
+  } catch (error) { next(error); }
+}
+
+export async function markAllNotificationsRead(req, res, next) {
+  try {
+    await getPatient(req);
+    const result = await Notification.updateMany({ recipientUserId: req.user._id, readAt: null }, { $set: { readAt: new Date() } });
+    res.json({ success: true, updated: result.modifiedCount });
   } catch (error) { next(error); }
 }
 

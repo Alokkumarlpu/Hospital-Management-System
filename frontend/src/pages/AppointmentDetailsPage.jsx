@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import ManagementLayout from '../components/ManagementLayout';
 import { Status } from './AppointmentsPage';
@@ -24,7 +24,8 @@ const blankNote = {
   followUpInstructions: '',
 };
 const blankMedicine = { medicineName: '', dosage: '', frequency: '', duration: '', route: '', instructions: '' };
-const blankReport = { reportName: '', testCategory: '', laboratory: '', description: '', reportNotes: '', status: 'requested' };
+const blankResult = { parameterName: '', resultValue: '', unit: '', referenceRange: '', resultStatus: '' };
+const blankReport = { reportName: '', testCategory: '', laboratory: '', description: '', reportNotes: '', findings: '', observations: '', doctorNotes: '', reportDate: '', results: [], status: 'requested' };
 
 function messageFrom(error, fallback) {
   return error.response?.data?.message || fallback;
@@ -60,13 +61,15 @@ export default function AppointmentDetailsPage() {
   const [noteForm, setNoteForm] = useState(blankNote);
   const [medicines, setMedicines] = useState([{ ...blankMedicine }]);
   const [reportForm, setReportForm] = useState(blankReport);
+  const [reportDraft, setReportDraft] = useState(null);
   const [reschedule, setReschedule] = useState({ appointmentDate: '', startTime: '', endTime: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const requestVersion = useRef(0);
 
-  async function loadRecords(visitId) {
+  async function loadRecords(visitId, appointmentId, patientId, version) {
     if (!visitId) {
       setNotes([]);
       setPrescriptions([]);
@@ -78,15 +81,34 @@ export default function AppointmentDetailsPage() {
       api.get(`/prescriptions/visit/${visitId}`),
       api.get(`/diagnostic-reports/visit/${visitId}`),
     ]);
-    setNotes(noteData.notes || []);
-    setPrescriptions(prescriptionData.data || []);
-    setReports(reportData.data || []);
+    if (version !== requestVersion.current) return;
+    const matchesConsultation = (item) => {
+      const linkedVisit = item.visitRecordId;
+      return String(linkedVisit?._id || linkedVisit) === String(visitId)
+        && (!linkedVisit?.appointmentId || String(linkedVisit.appointmentId) === String(appointmentId))
+        && (!linkedVisit?.patientId || String(linkedVisit.patientId) === String(patientId));
+    };
+    setNotes((noteData.notes || []).filter((item) => !item.visitRecordId || String(item.visitRecordId) === String(visitId)));
+    setPrescriptions((prescriptionData.data || []).filter(matchesConsultation));
+    setReports((reportData.data || []).filter(matchesConsultation));
   }
 
   async function load() {
+    const version = ++requestVersion.current;
     setLoading(true);
+    setAppointment(null);
+    setVisit(null);
+    setHistory(null);
+    setNotes([]);
+    setPrescriptions([]);
+    setReports([]);
+    setVisitForm({ ...blankVisit });
+    setNoteForm({ ...blankNote });
+    setMedicines([{ ...blankMedicine }]);
+    setReportForm({ ...blankReport });
     try {
       const { data } = await api.get(`/appointments/${id}`);
+      if (version !== requestVersion.current) return;
       const currentAppointment = data.appointment;
       setAppointment(currentAppointment);
       setReschedule({ appointmentDate: currentAppointment.appointmentDate?.slice(0, 10) || '', startTime: '', endTime: '' });
@@ -94,7 +116,9 @@ export default function AppointmentDetailsPage() {
         api.get(`/visits/appointment/${id}`),
         api.get('/history', { params: { patientId: currentAppointment.patientId._id } }),
       ]);
-      const currentVisit = visitData.data?.[0] || null;
+      if (version !== requestVersion.current) return;
+      const candidateVisit = visitData.data?.[0] || null;
+      const currentVisit = candidateVisit && String(candidateVisit.appointmentId?._id || candidateVisit.appointmentId) === String(id) ? candidateVisit : null;
       setVisit(currentVisit);
       setHistory(historyData);
       if (currentVisit) {
@@ -102,16 +126,19 @@ export default function AppointmentDetailsPage() {
         const latestNote = historyData.notes?.find((item) => String(item.visitRecordId) === String(currentVisit._id));
         if (latestNote) setNoteForm({ ...blankNote, ...latestNote });
       }
-      await loadRecords(currentVisit?._id);
+      await loadRecords(currentVisit?._id, id, currentAppointment.patientId._id, version);
       setError('');
     } catch (requestError) {
-      setError(messageFrom(requestError, 'Unable to load appointment workspace'));
+      if (version === requestVersion.current) setError(messageFrom(requestError, 'Unable to load appointment workspace'));
     } finally {
-      setLoading(false);
+      if (version === requestVersion.current) setLoading(false);
     }
   }
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => {
+    load();
+    return () => { requestVersion.current += 1; };
+  }, [id]);
 
   async function updateStatus(status) {
     setError('');
@@ -127,7 +154,7 @@ export default function AppointmentDetailsPage() {
     setError('');
     setSaving(true);
     try {
-      if (appointment.status === 'checked_in') await api.patch(`/appointments/${id}/status`, { status: 'in_progress' });
+      if (['scheduled', 'confirmed', 'checked_in'].includes(appointment.status)) await api.patch(`/appointments/${id}/status`, { status: 'in_progress' });
       if (!visit) {
         const { data } = await api.post('/visits', { patientId: appointment.patientId._id, appointmentId: id });
         setVisit(data.visit);
@@ -208,6 +235,71 @@ export default function AppointmentDetailsPage() {
     } finally {
       setSaving(false);
     }
+
+    function editReport(report) {
+      setReportDraft({ ...blankReport, ...report, reportDate: report.reportDate?.slice(0, 10) || '', results: report.results?.map((result) => ({ ...result })) || [] });
+    }
+
+    async function saveReportDraft(event) {
+      event.preventDefault();
+      setSaving(true);
+      setError('');
+      try {
+        await api.put(`/diagnostic-reports/${reportDraft._id}`, reportDraft);
+        setReportDraft(null);
+        await load();
+        setMessage('Diagnostic report updated.');
+      } catch (requestError) {
+        setError(messageFrom(requestError, 'Unable to update diagnostic report'));
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    async function updateReportStatus(report, status) {
+      setSaving(true);
+      setError('');
+      try {
+        await api.patch(`/diagnostic-reports/${report._id}/status`, { status });
+        await load();
+        setMessage(`Diagnostic report marked ${status}.`);
+      } catch (requestError) {
+        setError(messageFrom(requestError, 'Unable to update diagnostic report status'));
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    async function releaseDiagnosticReport(report) {
+      setSaving(true);
+      setError('');
+      try {
+        await api.post(`/diagnostic-reports/${report._id}/release`);
+        await load();
+        setMessage('Diagnostic report verified, released, and PDF generated.');
+      } catch (requestError) {
+        setError(messageFrom(requestError, 'Unable to release diagnostic report'));
+      } finally {
+        setSaving(false);
+      }
+    }
+  }
+
+  async function generateDocument(type, sourceId) {
+      setSaving(true);
+      setError('');
+      try {
+        const { data } = await api.post(`/documents/${type}/${sourceId}/generate`);
+        const file = await api.get(`/documents/${data.document._id}/download`, { responseType: 'blob' });
+        const url = URL.createObjectURL(file.data);
+        window.open(url, '_blank', 'noopener,noreferrer');
+        setMessage('PDF document generated successfully.');
+        await load();
+      } catch (requestError) {
+        setError(messageFrom(requestError, 'Unable to generate PDF document'));
+      } finally {
+        setSaving(false);
+    }
   }
 
   async function completeVisit() {
@@ -275,7 +367,7 @@ export default function AppointmentDetailsPage() {
         <div className="mt-6 flex flex-wrap gap-2">
           {canFrontDesk && appointment.status === 'scheduled' && <button className="button w-auto" onClick={() => updateStatus('confirmed')}>Confirm</button>}
           {canFrontDesk && appointment.status === 'confirmed' && <button className="button w-auto" onClick={() => updateStatus('checked_in')}>Check in</button>}
-          {canClinician && appointment.status === 'checked_in' && <button className="button w-auto" disabled={saving} onClick={startConsultation}>Start consultation</button>}
+          {canClinician && ['scheduled', 'confirmed', 'checked_in'].includes(appointment.status) && <button className="button w-auto" disabled={saving} onClick={startConsultation}>Start consultation</button>}
           {canClinician && appointment.status === 'in_progress' && !visit && <button className="button w-auto" disabled={saving} onClick={startConsultation}>Start consultation</button>}
           {canClinician && appointment.status === 'in_progress' && visit && <button className="button w-auto" disabled={saving} onClick={completeVisit}>Complete visit</button>}
           {canFrontDesk && ['scheduled', 'confirmed'].includes(appointment.status) && <><button className="button w-auto bg-red-600 hover:bg-red-700" onClick={cancel}>Cancel</button><a className="button-secondary" href="#reschedule">Reschedule</a></>}
@@ -306,10 +398,10 @@ export default function AppointmentDetailsPage() {
 
       {visit && <div className="grid gap-6 lg:grid-cols-2">
         <section className="page-card p-6"><h2 className="text-xl font-semibold">Clinical notes</h2>{notes.map((item) => <article className="mt-3 rounded-xl bg-slate-50 p-4" key={item._id}><p className="text-xs text-slate-500">{new Date(item.createdAt).toLocaleString()} · {item.lockedAt ? 'Finalized' : 'Draft'}</p><p className="mt-1">{item.assessment || item.treatmentPlan || item.followUpInstructions || 'Clinical note'}</p></article>)}{canEdit && <form className="mt-4 grid gap-3" onSubmit={saveNote}>{Object.keys(blankNote).map((field) => <TextField key={field} label={field.replaceAll(/([A-Z])/g, ' $1')} value={noteForm[field]} onChange={(value) => setNoteForm({ ...noteForm, [field]: value })} />)}<button className="button w-auto" disabled={saving}>Save clinical notes</button></form>}</section>
-        <section className="page-card p-6"><h2 className="text-xl font-semibold">Prescriptions</h2>{prescriptions.map((item) => <article className="mt-3 rounded-xl bg-slate-50 p-4" key={item._id}><p className="text-xs text-slate-500">{item.prescriptionId} · {item.lockedAt ? 'Finalized' : 'Draft'}</p>{item.medicines.map((medicine) => <p className="mt-1 text-sm" key={`${item._id}-${medicine.medicineName}`}>{medicine.medicineName} · {medicine.dosage} · {medicine.frequency} · {medicine.duration}</p>)}</article>)}{canEdit && <form className="mt-4" onSubmit={savePrescription}>{medicines.map((medicine, index) => <div className="mb-3 grid gap-2 border-b pb-3 sm:grid-cols-2" key={index}>{Object.keys(blankMedicine).map((field) => <input required={['medicineName', 'dosage', 'frequency', 'duration'].includes(field)} className="input mt-0" placeholder={field} key={field} value={medicine[field]} onChange={(event) => setMedicines(medicines.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: event.target.value } : item))} />)}</div>)}<button type="button" className="mr-3 text-blue-700" onClick={() => setMedicines([...medicines, { ...blankMedicine }])}>+ Add medicine</button><button className="button mt-3 w-auto" disabled={saving}>Save prescription</button></form>}</section>
+        <section className="page-card p-6"><h2 className="text-xl font-semibold">Prescriptions</h2>{prescriptions.map((item) => <article className="mt-3 rounded-xl bg-slate-50 p-4" key={item._id}><p className="text-xs text-slate-500">{item.prescriptionId} · {item.lockedAt ? 'Finalized' : 'Draft'}</p>{item.medicines.map((medicine) => <p className="mt-1 text-sm" key={`${item._id}-${medicine.medicineName}`}>{medicine.medicineName} · {medicine.dosage} · {medicine.frequency} · {medicine.duration}</p>        )}<button className="mt-2 text-sm font-semibold text-blue-700" onClick={() => generateDocument('prescription', item._id)}>Preview / download PDF</button></article>)}{canEdit && <form className="mt-4" onSubmit={savePrescription}>{medicines.map((medicine, index) => <div className="mb-3 grid gap-2 border-b pb-3 sm:grid-cols-2" key={index}>{Object.keys(blankMedicine).map((field) => <input required={['medicineName', 'dosage', 'frequency', 'duration'].includes(field)} className="input mt-0" placeholder={field} key={field} value={medicine[field]} onChange={(event) => setMedicines(medicines.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: event.target.value } : item))} />)}</div>)}<button type="button" className="mr-3 text-blue-700" onClick={() => setMedicines([...medicines, { ...blankMedicine }])}>+ Add medicine</button><button className="button mt-3 w-auto" disabled={saving}>Save prescription</button></form>}</section>
       </div>}
 
-      {visit && <section className="page-card p-6"><h2 className="text-xl font-semibold">Diagnostic reports</h2>{reports.map((item) => <article className="mt-3 rounded-xl bg-slate-50 p-4" key={item._id}><p className="font-semibold">{item.reportName}</p><p className="text-sm text-slate-500">{item.testCategory || 'Diagnostic test'} · {item.status} · {item.lockedAt ? 'Finalized' : 'Draft'}</p><p className="mt-1 text-sm">{item.description || item.reportNotes || 'No report notes recorded.'}</p></article>)}{canEdit && <form className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={saveReport}><Field label="Report / test name" required value={reportForm.reportName} onChange={(value) => setReportForm({ ...reportForm, reportName: value })} /><Field label="Test category" value={reportForm.testCategory} onChange={(value) => setReportForm({ ...reportForm, testCategory: value })} /><Field label="Laboratory" value={reportForm.laboratory} onChange={(value) => setReportForm({ ...reportForm, laboratory: value })} /><Field label="Status"><select className="input" value={reportForm.status} onChange={(event) => setReportForm({ ...reportForm, status: event.target.value })}><option value="requested">Requested</option><option value="pending">Pending</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select></Field><TextField label="Test description" value={reportForm.description} onChange={(value) => setReportForm({ ...reportForm, description: value })} /><TextField label="Report notes" value={reportForm.reportNotes} onChange={(value) => setReportForm({ ...reportForm, reportNotes: value })} /><button className="button w-auto md:col-span-2" disabled={saving}>Add diagnostic report</button></form>}</section>}
+      {visit && <section className="page-card p-6"><h2 className="text-xl font-semibold">Diagnostic reports</h2>{reports.map((item) => <article className="mt-3 rounded-xl bg-slate-50 p-4" key={item._id}><p className="font-semibold">{item.reportName}</p><p className="text-sm capitalize text-slate-500">{item.testCategory || 'Diagnostic test'} · {item.status} · {item.lockedAt ? 'Finalized' : 'Editable'}</p><p className="mt-1 text-sm">{item.description || item.reportNotes || 'No report notes recorded.'}</p>{item.results?.length ? <div className="mt-2 space-y-1 text-sm">{item.results.map((result) => <p key={`${item._id}-${result.parameterName}`}>{result.parameterName}: {result.resultValue} {result.unit || ''} · range {result.referenceRange || 'not recorded'}</p>)}</div> : <p className="mt-2 text-sm text-slate-500">Results not recorded.</p>}<div className="mt-3 flex flex-wrap gap-3">{canEdit && !item.lockedAt && item.status !== 'released' && <button className="text-sm font-semibold text-blue-700" onClick={() => editReport(item)}>Enter or edit results</button>}{canEdit && !item.lockedAt && item.status === 'requested' && <button className="text-sm font-semibold text-blue-700" onClick={() => updateReportStatus(item, 'pending')}>Start report</button>}{canEdit && !item.lockedAt && item.status === 'pending' && <button className="text-sm font-semibold text-blue-700" onClick={() => updateReportStatus(item, 'completed')}>Mark completed</button>}{canEdit && !item.lockedAt && item.status === 'completed' && <button className="text-sm font-semibold text-blue-700" onClick={() => updateReportStatus(item, 'verified')}>Verify report</button>}{canEdit && !item.lockedAt && item.status === 'verified' && <button className="text-sm font-semibold text-blue-700" onClick={() => releaseDiagnosticReport(item)}>Release and generate PDF</button>}{item.status === 'released' && item.documentId && <button className="text-sm font-semibold text-blue-700" onClick={() => generateDocument('diagnostic_report', item._id)}>Preview PDF</button>}</div>{reportDraft?._id === item._id && <form className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={saveReportDraft}><Field label="Test name" required value={reportDraft.reportName} onChange={(value) => setReportDraft({ ...reportDraft, reportName: value })} /><Field label="Test category" value={reportDraft.testCategory} onChange={(value) => setReportDraft({ ...reportDraft, testCategory: value })} /><Field label="Laboratory / technician" value={reportDraft.laboratory} onChange={(value) => setReportDraft({ ...reportDraft, laboratory: value })} /><Field label="Test date" type="date" value={reportDraft.reportDate} onChange={(value) => setReportDraft({ ...reportDraft, reportDate: value })} /><TextField label="Findings" value={reportDraft.findings} onChange={(value) => setReportDraft({ ...reportDraft, findings: value })} /><TextField label="Observations / remarks" value={reportDraft.observations} onChange={(value) => setReportDraft({ ...reportDraft, observations: value })} /><TextField label="Doctor notes" value={reportDraft.doctorNotes} onChange={(value) => setReportDraft({ ...reportDraft, doctorNotes: value })} /><div className="md:col-span-2"><p className="mb-2 text-sm font-semibold">Results</p>{reportDraft.results.map((result, index) => <div className="mb-2 grid gap-2 sm:grid-cols-5" key={index}>{['parameterName', 'resultValue', 'unit', 'referenceRange', 'resultStatus'].map((field) => <input className="input mt-0" placeholder={field} key={field} value={result[field] || ''} onChange={(event) => setReportDraft({ ...reportDraft, results: reportDraft.results.map((row, rowIndex) => rowIndex === index ? { ...row, [field]: event.target.value } : row) })} />)}</div>)}<button type="button" className="text-sm font-semibold text-blue-700" onClick={() => setReportDraft({ ...reportDraft, results: [...reportDraft.results, { ...blankResult }] })}>+ Add result</button></div><div className="flex gap-2 md:col-span-2"><button className="button w-auto" disabled={saving}>Save draft</button><button type="button" className="button-secondary" onClick={() => setReportDraft(null)}>Cancel</button></div></form>}</article>)}{canEdit && <form className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={saveReport}><Field label="Report / test name" required value={reportForm.reportName} onChange={(value) => setReportForm({ ...reportForm, reportName: value })} /><Field label="Test category" value={reportForm.testCategory} onChange={(value) => setReportForm({ ...reportForm, testCategory: value })} /><Field label="Laboratory / technician" value={reportForm.laboratory} onChange={(value) => setReportForm({ ...reportForm, laboratory: value })} /><TextField label="Test description" value={reportForm.description} onChange={(value) => setReportForm({ ...reportForm, description: value })} /><TextField label="Report notes" value={reportForm.reportNotes} onChange={(value) => setReportForm({ ...reportForm, reportNotes: value })} /><button className="button w-auto md:col-span-2" disabled={saving}>Add diagnostic report</button></form>}</section>}
 
       {canFrontDesk && ['scheduled', 'confirmed'].includes(appointment.status) && <form id="reschedule" className="page-card max-w-xl p-6" onSubmit={rescheduleAppointment}><h2 className="mb-4 text-xl font-semibold">Reschedule</h2><div className="grid gap-4 sm:grid-cols-3"><input required type="date" min={new Date().toISOString().slice(0, 10)} className="input mt-0" value={reschedule.appointmentDate} onChange={(event) => setReschedule({ ...reschedule, appointmentDate: event.target.value })} /><input required type="time" className="input mt-0" value={reschedule.startTime} onChange={(event) => setReschedule({ ...reschedule, startTime: event.target.value })} /><input required type="time" className="input mt-0" value={reschedule.endTime} onChange={(event) => setReschedule({ ...reschedule, endTime: event.target.value })} /></div><button className="button mt-4 w-auto">Save new time</button></form>}
     </div>

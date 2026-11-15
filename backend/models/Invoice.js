@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 
 const lineItemSchema = new mongoose.Schema(
   {
+    serviceId: { type: mongoose.Schema.Types.ObjectId, ref: 'BillableService' },
     description: { type: String, required: true, trim: true },
     category: { type: String, trim: true, maxlength: 100 },
     quantity: { type: Number, required: true, min: 1 },
@@ -26,8 +27,12 @@ const invoiceSchema = new mongoose.Schema(
     amountPaid: { type: Number, default: 0, min: 0 },
     outstandingBalance: { type: Number, required: true, min: 0 },
     status: { type: String, enum: ['draft', 'unpaid', 'partially_paid', 'paid', 'cancelled', 'overdue'], default: 'unpaid' },
+    generationType: { type: String, enum: ['automatic', 'manual'], default: 'manual' },
+    generationStatus: { type: String, enum: ['auto_generated', 'pending_review', 'failed', 'approved'], default: 'approved' },
+    generationError: { type: String, trim: true, maxlength: 500 },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    documentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Document' },
   },
   { timestamps: true },
 );

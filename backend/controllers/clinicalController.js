@@ -1,11 +1,13 @@
-import { Appointment, ClinicalNote, DiagnosticReport, Doctor, Patient, Prescription, VisitRecord } from '../models/index.js';
+import { Appointment, ClinicalNote, DiagnosticReport, Doctor, Patient, Prescription, User, VisitRecord } from '../models/index.js';
 import { writeAuditLog } from '../utils/audit.js';
 import { createPublicId } from '../utils/identifiers.js';
+import { createNotification } from '../utils/notifications.js';
 import { getPagination, paginatedResponse } from '../utils/pagination.js';
+import { processCompletedVisit, releaseDocument } from '../utils/postVisitWorkflow.js';
 
 const visitFields = ['chiefComplaint', 'symptoms', 'clinicalObservations', 'vitalSigns', 'assessmentNotes', 'treatmentPlan', 'followUpDate', 'additionalNotes'];
 const noteFields = ['chiefComplaint', 'historyOfPresentIllness', 'examinationFindings', 'clinicalObservations', 'assessment', 'treatmentPlan', 'followUpInstructions'];
-const reportFields = ['reportName', 'testCategory', 'laboratory', 'reportDate', 'description', 'reportNotes', 'fileMetadata'];
+const reportFields = ['reportName', 'testCategory', 'laboratory', 'reportDate', 'description', 'reportNotes', 'findings', 'observations', 'doctorNotes', 'results', 'fileMetadata'];
 
 function clinicalError(message, statusCode = 400) {
   return Object.assign(new Error(message), { statusCode });
@@ -32,6 +34,8 @@ async function ensurePatientAccess(req, patientId, doctorId) {
 async function getVisitForClinician(req, visitId) {
   const visit = await VisitRecord.findById(visitId);
   if (!visit) throw clinicalError('Visit record not found', 404);
+  const appointment = await Appointment.findOne({ _id: visit.appointmentId, patientId: visit.patientId, doctorId: visit.doctorId });
+  if (!appointment) throw clinicalError('Visit is not consistently linked to its appointment and patient', 409);
   await ensurePatientAccess(req, visit.patientId, visit.doctorId);
   return visit;
 }
@@ -86,7 +90,13 @@ export async function listVisits(req, res, next) {
     const { page, limit, skip } = getPagination(req.query);
     const filter = { ...dateFilter(req.query, 'visitDate') };
     if (req.query.patientId) filter.patientId = req.query.patientId;
-    if (req.query.appointmentId) filter.appointmentId = req.query.appointmentId;
+    if (req.query.appointmentId) {
+      const appointment = await Appointment.findById(req.query.appointmentId);
+      if (!appointment) throw clinicalError('Appointment not found', 404);
+      filter.appointmentId = appointment._id;
+      filter.patientId = appointment.patientId;
+      filter.doctorId = appointment.doctorId;
+    }
     if (req.user.role === 'clinician') {
       const doctor = await clinicianDoctor(req);
       if (!doctor) return res.json({ success: true, ...paginatedResponse({ page, limit, total: 0, data: [] }) });
@@ -141,6 +151,12 @@ export async function completeVisit(req, res, next) {
       if (!visit) throw clinicalError('Save the clinical consultation before completing the visit', 400);
       if (visit.lockedAt) throw clinicalError('This visit is already finalized', 409);
 
+      const completedAppointment = await Appointment.findOneAndUpdate(
+        { _id: appointment._id, status: 'in_progress' },
+        { $set: { status: 'completed' } },
+        { returnDocument: 'after' },
+      );
+      if (!completedAppointment) throw clinicalError('The appointment changed before completion. Refresh and try again.', 409);
       const lockedAt = new Date();
       visit.lockedAt = lockedAt;
       visit.updatedBy = req.user._id;
@@ -150,15 +166,24 @@ export async function completeVisit(req, res, next) {
         Prescription.updateMany({ visitRecordId: visit._id, lockedAt: null }, { $set: { lockedAt } }),
         DiagnosticReport.updateMany({ visitRecordId: visit._id }, { $set: { lockedAt } }),
       ]);
-
-      const completedAppointment = await Appointment.findOneAndUpdate(
-        { _id: appointment._id, status: 'in_progress' },
-        { $set: { status: 'completed' } },
-        { returnDocument: 'after' },
-      );
-      if (!completedAppointment) throw clinicalError('The appointment changed before completion. Refresh and try again.', 409);
       await writeAuditLog({ userId: req.user._id, action: 'complete', entityType: 'VisitRecord', entityId: visit._id, metadata: { appointmentId: appointment._id } });
-      res.json({ success: true, appointment: completedAppointment, visit });
+      let postVisit;
+      try {
+        postVisit = await processCompletedVisit({ appointment: completedAppointment, visit, userId: req.user._id });
+      } catch (workflowError) {
+        visit.billingStatus = 'failed';
+        await visit.save();
+        await createNotification({
+          recipientUserId: req.user._id,
+          type: 'billing',
+          title: 'Post-visit processing requires attention',
+          message: `Visit ${visit.visitId} was completed, but automated billing/report processing failed.`,
+          link: `/appointments/${appointment._id}`,
+          metadata: { appointmentId: appointment._id, visitId: visit._id, error: workflowError.message },
+          deduplicationKey: `visit-workflow-failed-doctor-${visit._id}`,
+        });
+      }
+      res.json({ success: true, appointment: completedAppointment, visit, postVisit });
     } catch (error) {
       next(error);
     }
@@ -216,10 +241,22 @@ async function getVisitForRecord(req, visitId) {
   return getVisitForClinician(req, visitId);
 }
 
+async function ensureRecordRelationship(req, record) {
+  const visit = await getVisitForRecord(req, record.visitRecordId);
+  const patientId = record.patientId?._id || record.patientId;
+  const doctorId = record.doctorId?._id || record.doctorId;
+  if (String(patientId) !== String(visit.patientId)
+    || String(doctorId) !== String(visit.doctorId)
+    || (record.appointmentId && String(record.appointmentId) !== String(visit.appointmentId))) {
+    throw clinicalError('Clinical record is not linked to this consultation', 409);
+  }
+  return visit;
+}
+
 export async function createPrescription(req, res, next) {
   try {
     const visit = await getVisitForRecord(req, req.body.visitRecordId);
-    const prescription = await Prescription.create({ prescriptionId: createPublicId('RX'), patientId: visit.patientId, doctorId: visit.doctorId, visitRecordId: visit._id, medicines: req.body.medicines, createdBy: req.user._id });
+    const prescription = await Prescription.create({ prescriptionId: createPublicId('RX'), patientId: visit.patientId, doctorId: visit.doctorId, appointmentId: visit.appointmentId, visitRecordId: visit._id, medicines: req.body.medicines, diagnosisOrAssessment: req.body.diagnosisOrAssessment, instructions: req.body.instructions, followUpDate: req.body.followUpDate, createdBy: req.user._id });
     await writeAuditLog({ userId: req.user._id, action: 'create', entityType: 'Prescription', entityId: prescription._id });
     res.status(201).json({ success: true, prescription });
   } catch (error) {
@@ -232,9 +269,11 @@ export async function listPrescriptions(req, res, next) {
     const { page, limit, skip } = getPagination(req.query);
     const filter = {};
     if (req.query.patientId) { filter.patientId = req.query.patientId; await ensurePatientAccess(req, req.query.patientId); }
-    if (req.query.visitRecordId) { filter.visitRecordId = req.query.visitRecordId; await getVisitForRecord(req, req.query.visitRecordId); }
+    const requestedVisitId = req.params.visitId || req.query.visitRecordId;
+    if (requestedVisitId) { const visit = await getVisitForRecord(req, requestedVisitId); filter.visitRecordId = visit._id; filter.patientId = visit.patientId; filter.$or = [{ appointmentId: visit.appointmentId }, { appointmentId: { $exists: false } }]; }
+    if (req.params.appointmentId || req.query.appointmentId) filter.appointmentId = req.params.appointmentId || req.query.appointmentId;
     if (req.user.role === 'clinician') filter.doctorId = (await clinicianDoctor(req))._id;
-    const [data, total] = await Promise.all([Prescription.find(filter).sort({ prescribedDate: -1 }).skip(skip).limit(limit).populate('patientId', 'patientId name').populate('doctorId', 'doctorId name').populate('visitRecordId', 'visitId visitDate'), Prescription.countDocuments(filter)]);
+    const [data, total] = await Promise.all([Prescription.find(filter).sort({ prescribedDate: -1 }).skip(skip).limit(limit).populate('patientId', 'patientId name').populate('doctorId', 'doctorId name').populate('visitRecordId', 'visitId visitDate patientId appointmentId'), Prescription.countDocuments(filter)]);
     res.json({ success: true, ...paginatedResponse({ page, limit, total, data }) });
   } catch (error) {
     next(error);
@@ -245,7 +284,7 @@ export async function getPrescription(req, res, next) {
   try {
     const prescription = await Prescription.findById(req.params.id).populate('patientId', 'patientId name').populate('doctorId', 'doctorId name specialization').populate('visitRecordId');
     if (!prescription) throw clinicalError('Prescription not found', 404);
-    await ensurePatientAccess(req, prescription.patientId._id || prescription.patientId, prescription.doctorId._id || prescription.doctorId);
+    await ensureRecordRelationship(req, prescription);
     res.json({ success: true, prescription });
   } catch (error) {
     next(error);
@@ -256,7 +295,7 @@ export async function updatePrescription(req, res, next) {
   try {
     const prescription = await Prescription.findById(req.params.id);
     if (!prescription) throw clinicalError('Prescription not found', 404);
-    await ensurePatientAccess(req, prescription.patientId, prescription.doctorId);
+    await ensureRecordRelationship(req, prescription);
     if (prescription.lockedAt) throw clinicalError('This prescription is locked and cannot be modified', 409);
     if (req.body.medicines) prescription.medicines = req.body.medicines;
     if (req.body.status) prescription.status = req.body.status;
@@ -275,7 +314,7 @@ export async function createReport(req, res, next) {
     if (req.body.status === 'completed' && !req.body.description && !req.body.reportNotes && !(req.body.fileMetadata && Object.keys(req.body.fileMetadata).length)) {
       throw clinicalError('A completed diagnostic report requires report notes, a description, or an attachment');
     }
-    const report = await DiagnosticReport.create({ ...pick(req.body, reportFields), reportId: createPublicId('RPT'), patientId: visit.patientId, doctorId: visit.doctorId, visitRecordId: visit._id, uploadedBy: req.user._id });
+    const report = await DiagnosticReport.create({ ...pick(req.body, reportFields), reportId: createPublicId('RPT'), patientId: visit.patientId, doctorId: visit.doctorId, appointmentId: visit.appointmentId, visitRecordId: visit._id, uploadedBy: req.user._id });
     await writeAuditLog({ userId: req.user._id, action: 'create', entityType: 'DiagnosticReport', entityId: report._id });
     res.status(201).json({ success: true, report });
   } catch (error) {
@@ -288,9 +327,11 @@ export async function listReports(req, res, next) {
     const { page, limit, skip } = getPagination(req.query);
     const filter = {};
     if (req.query.patientId) { filter.patientId = req.query.patientId; await ensurePatientAccess(req, req.query.patientId); }
-    if (req.query.visitRecordId) { filter.visitRecordId = req.query.visitRecordId; await getVisitForRecord(req, req.query.visitRecordId); }
+    const requestedVisitId = req.params.visitId || req.query.visitRecordId;
+    if (requestedVisitId) { const visit = await getVisitForRecord(req, requestedVisitId); filter.visitRecordId = visit._id; filter.patientId = visit.patientId; filter.$or = [{ appointmentId: visit.appointmentId }, { appointmentId: { $exists: false } }]; }
+    if (req.params.appointmentId || req.query.appointmentId) filter.appointmentId = req.params.appointmentId || req.query.appointmentId;
     if (req.user.role === 'clinician') filter.doctorId = (await clinicianDoctor(req))._id;
-    const [data, total] = await Promise.all([DiagnosticReport.find(filter).sort({ reportDate: -1 }).skip(skip).limit(limit).populate('patientId', 'patientId name').populate('doctorId', 'doctorId name').populate('visitRecordId', 'visitId visitDate'), DiagnosticReport.countDocuments(filter)]);
+    const [data, total] = await Promise.all([DiagnosticReport.find(filter).sort({ reportDate: -1 }).skip(skip).limit(limit).populate('patientId', 'patientId name').populate('doctorId', 'doctorId name').populate('visitRecordId', 'visitId visitDate patientId appointmentId').populate('documentId', 'documentId generationStatus status availability'), DiagnosticReport.countDocuments(filter)]);
     res.json({ success: true, ...paginatedResponse({ page, limit, total, data }) });
   } catch (error) {
     next(error);
@@ -301,7 +342,7 @@ export async function getReport(req, res, next) {
   try {
     const report = await DiagnosticReport.findById(req.params.id).populate('patientId', 'patientId name').populate('doctorId', 'doctorId name specialization').populate('visitRecordId');
     if (!report) throw clinicalError('Diagnostic report not found', 404);
-    await ensurePatientAccess(req, report.patientId._id || report.patientId, report.doctorId._id || report.doctorId);
+    await ensureRecordRelationship(req, report);
     res.json({ success: true, report });
   } catch (error) {
     next(error);
@@ -312,11 +353,12 @@ export async function updateReportStatus(req, res, next) {
   try {
     const report = await DiagnosticReport.findById(req.params.id);
     if (!report) throw clinicalError('Diagnostic report not found', 404);
-    await ensurePatientAccess(req, report.patientId, report.doctorId);
+    await ensureRecordRelationship(req, report);
     if (report.lockedAt) throw clinicalError('This diagnostic report is locked and cannot be modified', 409);
-    if (req.body.status === 'completed' && !report.description && !report.reportNotes && !(report.fileMetadata && Object.keys(report.fileMetadata).length)) {
+    if (req.body.status === 'completed' && !report.description && !report.reportNotes && !report.findings && !report.observations && !report.results?.length) {
       throw clinicalError('A completed diagnostic report requires report notes, a description, or an attachment');
     }
+
     const previous = report.status;
     report.status = req.body.status;
     await report.save();
@@ -325,6 +367,47 @@ export async function updateReportStatus(req, res, next) {
   } catch (error) {
     next(error);
   }
+}
+
+export async function updateReport(req, res, next) {
+  try {
+    const report = await DiagnosticReport.findById(req.params.id);
+    if (!report) throw clinicalError('Diagnostic report not found', 404);
+    await ensureRecordRelationship(req, report);
+    if (report.lockedAt || report.status === 'released') throw clinicalError('Released reports cannot be modified', 409);
+    Object.assign(report, pick(req.body, reportFields));
+    if (req.body.status) report.status = req.body.status;
+    await report.save();
+    res.json({ success: true, report });
+  } catch (error) { next(error); }
+}
+
+export async function releaseReport(req, res, next) {
+  try {
+    const report = await DiagnosticReport.findById(req.params.id);
+    if (!report) throw clinicalError('Diagnostic report not found', 404);
+    await ensureRecordRelationship(req, report);
+    if (report.status !== 'verified') throw clinicalError('Report must be verified before release', 409);
+    if (!report.results?.length && !report.findings && !report.observations && !report.reportNotes) throw clinicalError('Report results are required before release', 400);
+    const visit = await VisitRecord.findById(report.visitRecordId);
+    const [patient, doctor, appointment] = await Promise.all([
+      Patient.findById(report.patientId),
+      Doctor.findById(report.doctorId),
+      Appointment.findById(report.appointmentId),
+    ]);
+    if (!visit || !patient || !doctor || !appointment) throw clinicalError('Report relationships are incomplete', 409);
+    const document = await releaseDocument({ type: 'diagnostic_report', source: report, patient, doctor, appointment, visit, userId: req.user._id });
+    report.status = 'released';
+    report.documentId = document._id;
+    await report.save();
+    const recipients = await User.find({ role: { $in: ['admin', 'front_desk'] }, isActive: true }).select('_id');
+    await Promise.all([
+      patient.userId && createNotification({ recipientUserId: patient.userId, type: 'clinical', title: 'Diagnostic report released', message: `${report.reportName} is now available in your Diagnostic Reports page.`, link: '/patient/diagnostics', metadata: { reportId: report._id, documentId: document._id }, deduplicationKey: `report-released-patient-${report._id}` }),
+      doctor.userId && createNotification({ recipientUserId: doctor.userId, type: 'clinical', title: 'Diagnostic report released', message: `${report.reportName} was released successfully.`, link: `/appointments/${appointment._id}`, metadata: { reportId: report._id, documentId: document._id }, deduplicationKey: `report-released-doctor-${report._id}` }),
+      ...recipients.map((recipient) => createNotification({ recipientUserId: recipient._id, type: 'clinical', title: 'Diagnostic report released', message: `${report.reportName} is available for authorized access.`, link: '/invoices', metadata: { reportId: report._id, documentId: document._id }, deduplicationKey: `report-released-front-desk-${recipient._id}-${report._id}` })),
+    ]);
+    res.json({ success: true, report, document });
+  } catch (error) { next(error); }
 }
 
 export async function patientHistory(req, res, next) {

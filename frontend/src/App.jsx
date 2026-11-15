@@ -69,7 +69,6 @@ function App() {
           <Route path="/patient/billing" element={<PatientPortalPage />} />
           <Route path="/patient/payments" element={<PatientPortalPage />} />
           <Route path="/patient/notifications" element={<PatientPortalPage />} />
-          <Route path="/patient/profile" element={<PatientPortalPage />} />
           <Route path="/patient/settings" element={<PatientPortalPage />} />
         </Route>
         <Route element={<RoleRoute roles={['admin', 'clinician']} />}>
